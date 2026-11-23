@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+A turn card can show the next manoeuvre over the cluster map, below the
+position arrow or at the top, while the BMW navigation guides, CarPlay's
+guidance included: a turn, a fork, a roundabout's exit or the destination,
+with the distance and the road. It is off unless turned on in the app.
+
 ## 0.14.18
 
 On a car not coded for the CarPlay cluster map, a map patch that CarPlay's
