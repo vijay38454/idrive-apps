@@ -6,8 +6,11 @@
  * it and empty slots only saying there is no manoeuvre; each turn's
  * direction, a fork's side, a roundabout's exit and the destination's side
  * as the card's arrow, and the plain mark for a kind or direction not known;
- * the distance's text and unit, metres and kilometres; a
- * text's length never taken for its direction (the mistake of the first
+ * the distance's text and unit, metres and kilometres, and yards, miles and
+ * feet; where traffic keeps left (the values carplay sends there): the
+ * U-turn over the right, roundabouts driven round clockwise with their
+ * exits' numbers, a motorway's slip roads, ferries, for any car, the
+ * arrow and the exit's number never from the text; a text's length never taken for its direction (the mistake of the first
  * reading); the list mid-rebuild keeping the card; cut, garbled and
  * implausible input read without a fault and without inventing events. */
 #include <cstdio>
@@ -198,7 +201,7 @@ int main()
     {
         const Maneuver::Kind want[] = {Maneuver::Straight,    Maneuver::Left,       Maneuver::SlightLeft,
                                        Maneuver::SharpLeft,   Maneuver::Right,      Maneuver::SlightRight,
-                                       Maneuver::SharpRight,  Maneuver::UTurn,      Maneuver::UTurn};
+                                       Maneuver::SharpRight,  Maneuver::UTurnRight, Maneuver::UTurn};
         bool all = true;
         for (uint32_t d = 1; d <= 9; d++) {
             Payload p;
@@ -207,7 +210,7 @@ int main()
             all = all && route_box_maneuver(e, &m) && m.kind == want[d - 1] && event_known(kRouteBoxTurn, d);
         }
         ok("turn directions 1 to 9: straight, left, slight left, sharp left, right, slight right, sharp right, "
-           "U-turn, and 9 the U-turn a drive where traffic keeps right had",
+           "8 the U-turn over the right (where traffic keeps left), 9 over the left (a drive where it keeps right had)",
            all);
     }
     {
@@ -257,6 +260,15 @@ int main()
            kind_of_event(kRouteBoxFork, 1) == Maneuver::KeepLeft && event_known(kRouteBoxFork, 1) &&
                event_known(kRouteBoxFork, 2) && kind_of_event(kRouteBoxFork, 3) == Maneuver::Other &&
                !event_known(kRouteBoxFork, 3));
+        ok("a fork's 9 and 10 (a motorway's on ramp) keep left and right, 6 and 7 off a motorway left and right",
+           kind_of_event(kRouteBoxFork, 9) == Maneuver::KeepLeft && kind_of_event(kRouteBoxFork, 10) == Maneuver::KeepRight &&
+               kind_of_event(kRouteBoxFork, 6) == Maneuver::ExitLeft && kind_of_event(kRouteBoxFork, 7) == Maneuver::ExitRight &&
+               event_known(kRouteBoxFork, 9) && event_known(kRouteBoxFork, 10) && event_known(kRouteBoxFork, 6) &&
+               event_known(kRouteBoxFork, 7));
+        ok("a fork's 4, 5, 8 and 11 to 15 (not what carplay sends): the plain mark",
+           kind_of_event(kRouteBoxFork, 4) == Maneuver::Other && kind_of_event(kRouteBoxFork, 5) == Maneuver::Other &&
+               kind_of_event(kRouteBoxFork, 8) == Maneuver::Other && kind_of_event(kRouteBoxFork, 11) == Maneuver::Other &&
+               kind_of_event(kRouteBoxFork, 15) == Maneuver::Other && !event_known(kRouteBoxFork, 8));
     }
     {
         Payload p;
@@ -283,8 +295,15 @@ int main()
         Payload p;
         p.u32(0).screen(kClusterRouteBox, {roundabout("50", 4, "Rua Exemplo", 270, 3, 1)});
         parse(p, kClusterRouteBox, &e);
-        ok("a roundabout not as where traffic keeps right: the plain mark, not known",
-           route_box_maneuver(e, &m) && m.kind == Maneuver::Other && !event_known(kRouteBoxRoundabout, 1));
+        ok("a roundabout where traffic keeps left (side 1): the ring clockwise, its exit's number, known",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::Roundabout && m.clockwise && m.exit_deg == -90 &&
+               m.exit_number == 3 && event_known(kRouteBoxRoundabout, 1));
+        Payload three;
+        three.u32(0).screen(kClusterRouteBox, {roundabout("50", 4, "Rua Exemplo", 270, 3, 3)});
+        parse(three, kClusterRouteBox, &e);
+        ok("a roundabout's side neither 1 nor 2: the plain mark, not known",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::Other && !event_known(kRouteBoxRoundabout, 3) &&
+               !event_known(kRouteBoxRoundabout, 0));
         Payload z;
         z.u32(0).screen(kClusterRouteBox, {roundabout("50", 4, "Rua Exemplo", 0, 1)});
         parse(z, kClusterRouteBox, &e);
@@ -441,9 +460,119 @@ int main()
        route_box_distance("300", 4) == "300 m" && route_box_distance("1,5", 1) == "1,5 km" &&
            route_box_distance(" ", 0).empty() && route_box_distance("", 4).empty() &&
            route_box_distance("1,2", 7) == "1,2");
-    ok("units 0, 1 and 4 known, 7 not", unit_known(0) && unit_known(1) && unit_known(4) && !unit_known(7));
+    ok("distance: yards for unit 5, miles for 3 (carplay's) and 2, feet for 6",
+       route_box_distance("220", 5) == "220 yd" && route_box_distance("0.7", 3) == "0.7 mi" &&
+           route_box_distance("1.5", 2) == "1.5 mi" && route_box_distance("350", 6) == "350 ft" &&
+           route_box_distance(" ", 5).empty());
+    ok("units 0 to 6 known, 7 not", unit_known(0) && unit_known(1) && unit_known(2) && unit_known(3) &&
+                                        unit_known(4) && unit_known(5) && unit_known(6) && !unit_known(7));
     ok("an empty slot: no arrow, known", kind_of_event(kRouteBoxEmpty, 0) == Maneuver::None &&
                                              event_known(kRouteBoxEmpty, 0));
+
+    /* a route where traffic keeps left (a UK one): what carplay sends there */
+    {
+        Payload p;
+        p.u32(0).screen(kClusterRouteBox, {roundabout("220", 5, "Take the 2nd exit onto A289", 90, 2, 1),
+                                           turn(" ", 0, "Turn left onto A2", 2, 1), empty_slot()});
+        parse(p, kClusterRouteBox, &e);
+        ok("keeps left: a roundabout's 2nd exit to the right, 220 yards: clockwise, exit 90, its number 2, yd",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::Roundabout && m.clockwise && m.exit_deg == 90 &&
+               m.exit_number == 2 && m.distance == "220 yd" && m.road == "Take the 2nd exit onto A289");
+        const struct { uint16_t angle; uint8_t exit; int deg; } guessed[] = {{270, 1, -90}, {360, 2, 0}, {90, 3, 90}};
+        bool all = true;
+        for (const auto &x : guessed) {
+            Payload q;
+            q.u32(0).screen(kClusterRouteBox, {roundabout("0.4", 3, "Roundabout", x.angle, x.exit, 1)});
+            parse(q, kClusterRouteBox, &e);
+            all = all && route_box_maneuver(e, &m) && m.clockwise && m.exit_deg == x.deg && m.exit_number == x.exit &&
+                  m.distance == "0.4 mi";
+        }
+        ok("keeps left: carplay's exits without the phone's angle (270, 360, 90 by the 1st, 2nd, 3rd): left, ahead, right",
+           all);
+        Payload u;
+        u.u32(0).screen(kClusterRouteBox, {roundabout("200", 5, "Go all the way round", 180, 0, 1)});
+        parse(u, kClusterRouteBox, &e);
+        ok("keeps left: round it and back (180, exit 0), the text naming no exit: clockwise, no number",
+           route_box_maneuver(e, &m) && m.clockwise && m.exit_deg == 180 && m.exit_number == 0);
+        Payload u4;
+        u4.u32(0).screen(kClusterRouteBox, {roundabout("200", 5, "Take the 4th exit onto A2", 180, 0, 1)});
+        parse(u4, kClusterRouteBox, &e);
+        ok("keeps left: round it and back (exit 0), the text naming the 4th exit: no number, the text never read",
+           route_box_maneuver(e, &m) && m.exit_deg == 180 && m.exit_number == 0);
+        Payload n2;
+        n2.u32(0).screen(kClusterRouteBox, {roundabout("200", 5, "Take the 4th exit onto A2", 90, 2, 1)});
+        parse(n2, kClusterRouteBox, &e);
+        ok("keeps left: the route box's own number, whatever the text says", route_box_maneuver(e, &m) && m.exit_number == 2);
+        Payload t;
+        t.u32(0).screen(kClusterRouteBox, {turn("100", 5, "Make a U-turn", 8)});
+        parse(t, kClusterRouteBox, &e);
+        ok("keeps left: a U-turn (8) back over the right, 100 yards",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::UTurnRight && m.distance == "100 yd");
+        Payload r;
+        r.u32(0).screen(kClusterRouteBox, {fork("0.2", 3, "Take the slip road to M25", 1), empty_slot()});
+        parse(r, kClusterRouteBox, &e);
+        ok("keeps left: a motorway's off ramp (fork 1) named a slip road: keep left as sent, miles",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::KeepLeft && m.distance == "0.2 mi");
+        Payload o;
+        o.u32(0).screen(kClusterRouteBox, {fork("350", 6, "Merge onto A1(M)", 9)});
+        parse(o, kClusterRouteBox, &e);
+        ok("keeps left: an on ramp (fork 9) keep left, feet",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::KeepLeft && m.distance == "350 ft");
+        Payload d;
+        d.u32(0).screen(kClusterRouteBox, {destination("50", 5, "Destination", 1)});
+        parse(d, kClusterRouteBox, &e);
+        ok("keeps left: the destination on the left, yards",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::ArriveLeft && m.distance == "50 yd");
+    }
+
+
+    /* the same values where traffic keeps right: what any car gets */
+    {
+        Payload p;
+        p.u32(0).screen(kClusterRouteBox, {roundabout("220", 5, "Take the 2nd exit onto A289", 90, 2, 1)});
+        parse(p, kClusterRouteBox, &e);
+        ok("any car: a clockwise roundabout, its number and yards",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::Roundabout && m.clockwise && m.exit_number == 2 &&
+               m.distance == "220 yd");
+        Payload u4;
+        u4.u32(0).screen(kClusterRouteBox, {roundabout("200", 5, "Take the 4th exit onto A2", 180, 0, 1)});
+        parse(u4, kClusterRouteBox, &e);
+        ok("any car: round it and back, the text not read (no number)",
+           route_box_maneuver(e, &m) && m.exit_number == 0);
+        Payload t;
+        t.u32(0).screen(kClusterRouteBox, {turn("100", 5, "Make a U-turn", 8)});
+        parse(t, kClusterRouteBox, &e);
+        ok("any car: a U-turn (8) back over the right", route_box_maneuver(e, &m) && m.kind == Maneuver::UTurnRight);
+        Payload r;
+        r.u32(0).screen(kClusterRouteBox, {fork("0.2", 3, "Take the slip road to M25", 1)});
+        parse(r, kClusterRouteBox, &e);
+        ok("any car: a fork named a slip road stays keep left (the text not read)",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::KeepLeft && m.distance == "0.2 mi");
+        Payload k;
+        k.u32(0).screen(kClusterRouteBox, {fork("1,5", 1, "Keep right for Centro", 2)});
+        parse(k, kClusterRouteBox, &e);
+        ok("a fork naming no exit stays keep right", route_box_maneuver(e, &m) && m.kind == Maneuver::KeepRight);
+        Payload o;
+        o.u32(0).screen(kClusterRouteBox, {fork("800", 4, "Entrada para Rodovia", 10)});
+        parse(o, kClusterRouteBox, &e);
+        ok("any car where traffic keeps right: an on ramp (fork 10) keep right",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::KeepRight && m.distance == "800 m");
+    }
+    /* a ferry: BMW's VehicleTransportation, its length's distance after the text */
+    {
+        Payload d = head("2.5", 3, "Take the ferry", 2);
+        d.f64(4000).str("2.5").u32(3).f64(1.0).u8(0).u32(0);
+        Payload p;
+        p.u32(0).screen(kClusterRouteBox, {event(kRouteBoxFerry, d)});
+        parse(p, kClusterRouteBox, &e);
+        ok("a ferry: its icon, its distance and text (not its length's)",
+           route_box_maneuver(e, &m) && m.kind == Maneuver::Ferry && m.distance == "2.5 mi" && m.road == "Take the ferry" &&
+               event_known(kRouteBoxFerry, 0));
+        Payload bare;
+        bare.u32(0).screen(kClusterRouteBox, {event(kRouteBoxFerry, Payload().u32(0).u32(1))});
+        parse(bare, kClusterRouteBox, &e);
+        ok("a ferry laid out otherwise: its icon, no text", route_box_maneuver(e, &m) && m.kind == Maneuver::Ferry && m.road.empty());
+    }
 
     std::printf("%s\n", failures ? "FAILED" : "all ok");
     return failures ? 1 : 0;

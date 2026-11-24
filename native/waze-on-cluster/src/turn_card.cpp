@@ -71,6 +71,8 @@ struct Icon {
         std::vector<Pt> pts;
         float half;
         bool grey;
+        float clip = 0;      /* no ink nearer clip_c than this */
+        Pt clip_c = {0, 0};
     };
     struct Head {
         Pt tip, a, b;
@@ -138,31 +140,75 @@ void arrow(Icon *ic, const std::vector<Pt> &pts, float r)
                          {b.x + u.y * kHeadHalf, b.y - u.x * kHeadHalf}});
 }
 
-/* The roundabout: the ring grey, the way round it white from its foot
- * anticlockwise to the exit, the exit's arm and head along bearing exit. */
-void roundabout(Icon *ic, int exit_deg)
+/* A roundabout's exit as drawn, -135 to 128: the exit kept clear of the way
+ * in, the sharpest right at 128 (its head clear of the way in), back (anticlockwise, all but round) down
+ * to the left of it. */
+float drawn_exit(int exit_deg)
 {
-    const Pt c = {24, 25};
-    const float r = 10, ring = 2.6f;
     float e = (float)exit_deg;
     if (e > 180 || e <= -180)
         e = std::fmod(std::fmod(e + 180, 360.0f) + 360, 360.0f) - 180;
-    /* the exit kept clear of the way in: the sharpest right at 140, back
-     * (anticlockwise, all but round) down to the left of it */
-    if (e > 140)
-        e = e >= 165 ? -135 : 140;
+    if (e > 128)
+        e = e >= 165 ? -135 : 128;
     if (e < -135)
         e = -135;
+    return e;
+}
+
+/* The ring's middle for exit e: (24, 25); with the exit's number in it (a
+ * wider ring) moved 2.8 back from the exit, to leave room for a neck
+ * between the ring and the exit's head. */
+Pt ring_centre(float e, bool numbered)
+{
+    if (!numbered)
+        return {24, 25};
+    const Pt u = bearing(e);
+    return {24 - u.x * 2.8f, 25 - u.y * 2.8f};
+}
+
+/* The roundabout: the ring grey, the way round it white from its foot
+ * anticlockwise to the exit, the exit's arm and head along bearing exit.
+ * numbered: the ring wider (12) for the exit's number inside it, moved back
+ * from the exit (ring_centre), a neck of 1.5 between the ring's edge and the
+ * head; the stem runs straight across the ring's band to its inner edge, the
+ * arm into the band from its round end, cut at the band's centre line as
+ * wide as the way round's own end there (no step between them, and clear of
+ * the digits), nothing of either in the hole or beside its own width. Otherwise as it always was. Clockwise is
+ * its mirror (icon_of). */
+void roundabout(Icon *ic, int exit_deg, bool numbered)
+{
+    const float e = drawn_exit(exit_deg);
+    const Pt c = ring_centre(e, numbered);
+    const float r = numbered ? 12 : 10, ring = 2.6f, arm = numbered ? 4.1f : 3;
+    /* numbered: the stem from the middle, cut at the band's inner edge; the
+     * arm's round end cut at the centre line where it is as wide as the
+     * ring's band */
+    const float clip = numbered ? r - ring : 0;
+    const float start = numbered ? r + std::sqrt(kHalf * kHalf - ring * ring) : r;
     ic->arcs.push_back({c, r, ring, 0, 360, true});
-    ic->strokes.push_back({{{24, 47}, {24, c.y + r}}, kHalf, false});
+    ic->strokes.push_back({{{c.x, 47}, {c.x, c.y + (numbered ? 0 : r)}}, kHalf, false, clip, c});
     /* anticlockwise from the foot (bearing 180) down to e */
     ic->arcs.push_back({c, r, ring, e, 180, false});
     const Pt u = bearing(e);
-    const Pt s = {c.x + u.x * r, c.y + u.y * r}, b = {c.x + u.x * (r + 3), c.y + u.y * (r + 3)};
-    ic->strokes.push_back({{s, b}, kHalf, false});
+    const Pt s = {c.x + u.x * start, c.y + u.y * start}, b = {c.x + u.x * (r + arm), c.y + u.y * (r + arm)};
+    ic->strokes.push_back({{s, b}, kHalf, false, numbered ? r : 0, c});
     ic->heads.push_back({{b.x + u.x * (kHeadLen - 2), b.y + u.y * (kHeadLen - 2)},
                          {b.x - u.y * (kHeadHalf - 1), b.y + u.x * (kHeadHalf - 1)},
                          {b.x + u.y * (kHeadHalf - 1), b.y - u.x * (kHeadHalf - 1)}});
+}
+
+/* A ferry: a boat (its hull, cabin and funnel) white over grey waves. */
+void ferry(Icon *ic)
+{
+    /* the hull, narrower at the keel: split along both diagonals, each
+     * inside a triangle, so no seam shows */
+    ic->heads.push_back({{9, 26}, {41, 26}, {35, 35}});
+    ic->heads.push_back({{9, 26}, {35, 35}, {15, 35}});
+    ic->heads.push_back({{9, 26}, {41, 26}, {15, 35}});
+    ic->heads.push_back({{41, 26}, {35, 35}, {15, 35}});
+    ic->boxes.push_back({17, 17, 33, 26, false});   /* the cabin */
+    ic->boxes.push_back({22, 9, 27, 17, false});    /* the funnel */
+    ic->strokes.push_back({{{6, 42}, {12, 39}, {18, 42}, {24, 39}, {30, 42}, {36, 39}, {42, 42}}, 1.8f, true});
 }
 
 /* The destination: a chequered flag on its pole, the pole at x. */
@@ -176,8 +222,15 @@ void flag(Icon *ic, float x)
                                  (row + col) % 2 == 1});
 }
 
+/* Whether m's roundabout shows its exit's number in the ring: 1 to 19. */
+bool ring_number(const Maneuver &m)
+{
+    return m.kind == Maneuver::Roundabout && m.exit_number >= 1 && m.exit_number <= 19;
+}
+
 /* The icon of m as for traffic on the right, and whether it is drawn
- * mirrored (a left-hand kind: its right-hand one). */
+ * mirrored (a left-hand kind: its right-hand one; a roundabout driven round
+ * clockwise: the anticlockwise one to the mirrored exit). */
 Icon icon_of(const Maneuver &m, bool *mirror)
 {
     Icon ic;
@@ -198,17 +251,17 @@ Icon icon_of(const Maneuver &m, bool *mirror)
     switch (m.kind) {
     case Maneuver::Straight: arrow(&ic, {{24, 47}, {24, 15}}, 0); break;
     case Maneuver::SlightLeft:
-    case Maneuver::SlightRight: arrow(&ic, {{18, 47}, {18, 31}, {29, 20}}, 9); break;
+    case Maneuver::SlightRight: arrow(&ic, {{16, 47}, {16, 31}, {27, 20}}, 9); break;
     case Maneuver::Left:
-    case Maneuver::Right: arrow(&ic, {{17, 47}, {17, 23}, {31, 23}}, 9); break;
+    case Maneuver::Right: arrow(&ic, {{12.5f, 47}, {12.5f, 23}, {26.5f, 23}}, 9); break;
     case Maneuver::SharpLeft:
-    case Maneuver::SharpRight: arrow(&ic, {{14, 47}, {14, 13}, {30, 27}}, 10); break;
+    case Maneuver::SharpRight: arrow(&ic, {{13, 47}, {13, 13}, {29, 27}}, 10); break;
     /* back over the left; mirrored, over the right */
     case Maneuver::UTurn:
-    case Maneuver::UTurnRight: arrow(&ic, {{32, 47}, {32, 12}, {15, 12}, {15, 27}}, 8); break;
+    case Maneuver::UTurnRight: arrow(&ic, {{35.5f, 47}, {35.5f, 12}, {18.5f, 12}, {18.5f, 27}}, 8); break;
     case Maneuver::KeepLeft:
     case Maneuver::KeepRight:
-        ic.strokes.push_back({rounded({{20, 47}, {20, 33}, {14, 22}, {14, 4}}, 7), kHalf, true});
+        ic.strokes.push_back({rounded({{20, 47}, {20, 33}, {14, 22}, {14, -4}}, 7), kHalf, true});
         arrow(&ic, {{20, 47}, {20, 33}, {30, 23}, {30, 15}}, 8);
         break;
     case Maneuver::ExitLeft:
@@ -216,13 +269,17 @@ Icon icon_of(const Maneuver &m, bool *mirror)
         ic.strokes.push_back({{{19, 47}, {19, 3}}, kHalf, true});
         arrow(&ic, {{19, 47}, {19, 30}, {29, 20}}, 9);
         break;
-    case Maneuver::Roundabout: roundabout(&ic, m.exit_deg); break;
-    case Maneuver::Arrive: flag(&ic, 15); break;
+    case Maneuver::Roundabout:
+        *mirror = m.clockwise;
+        roundabout(&ic, m.clockwise ? -m.exit_deg : m.exit_deg, ring_number(m));
+        break;
+    case Maneuver::Ferry: ferry(&ic); break;
+    case Maneuver::Arrive: flag(&ic, 14); break;
     /* the flag at the road's side: mirrored, on the left */
     case Maneuver::ArriveLeft:
     case Maneuver::ArriveRight:
-        ic.strokes.push_back({{{12, 47}, {12, 4}}, kHalf, true});
-        flag(&ic, 24);
+        ic.strokes.push_back({{{9, 47}, {9, -4}}, kHalf, true});
+        flag(&ic, 21);
         break;
     case Maneuver::Other:
         /* no direction to tell: a dot in the middle, no stroke */
@@ -274,10 +331,8 @@ float arc_in(float fx, float fy, const Icon::Arc &a)
 /* m's icon, drawn size x size pixels (48: the icon's own units) at ox, oy:
  * each pixel's centre taken back to the 48x48 drawing, and each edge's
  * distance to pixels again, so a smaller icon stays as smooth. */
-void draw_icon(Canvas *c, const Maneuver &m, int ox, int oy, int size)
+void draw_shapes(Canvas *c, const Icon &ic, bool mirror, int ox, int oy, int size)
 {
-    bool mirror = false;
-    const Icon ic = icon_of(m, &mirror);
     const float k = size / 48.0f;   /* pixels per unit of the drawing */
     for (int y = 0; y < size; y++) {
         for (int x = 0; x < size; x++) {
@@ -291,7 +346,12 @@ void draw_icon(Canvas *c, const Maneuver &m, int ox, int oy, int size)
                     const float sd = seg_dist(fx, fy, s.pts[i], s.pts[i + 1]);
                     d = sd < d ? sd : d;
                 }
-                const float cov = edge((s.half - d) * k);
+                float in = s.half - d;
+                if (s.clip > 0) {
+                    const float out = dist({fx, fy}, s.clip_c) - s.clip;
+                    in = out < in ? out : in;
+                }
+                const float cov = edge(in * k);
                 float &dst = s.grey ? grey : white;
                 dst = cov > dst ? cov : dst;
             }
@@ -328,6 +388,12 @@ void draw_icon(Canvas *c, const Maneuver &m, int ox, int oy, int size)
     }
 }
 
+void draw_icon(Canvas *c, const Maneuver &m, int ox, int oy, int size)
+{
+    bool mirror = false;
+    draw_shapes(c, icon_of(m, &mirror), mirror, ox, oy, size);
+}
+
 /* runs of f with the pen at x, the baseline at y */
 void draw_line(Canvas *c, const CardFont &f, const std::vector<CardRun> &runs, int x, int y, uint8_t r, uint8_t g,
                uint8_t b)
@@ -342,6 +408,90 @@ void draw_line(Canvas *c, const CardFont &f, const std::vector<CardRun> &runs, i
                     c->blend(gx + px, gy + py, r, g, b, a / 255.0f);
             }
     }
+}
+
+/* The small bold text of the ring's number: the distance's bold font at
+ * kSmall of its size, each pixel the mean of 4x4 samples of the
+ * glyphs' pictures. */
+const float kSmall = 0.6f;
+
+/* runs of f at k of their size, the pen at x, the baseline at base */
+void draw_scaled(Canvas *c, const CardFont &f, const std::vector<CardRun> &runs, float x, float base, float k,
+                 uint8_t r, uint8_t g, uint8_t b)
+{
+    for (const CardRun &run : runs) {
+        const CardGlyph &gl = *run.g;
+        if (!gl.w || !gl.h)
+            continue;
+        const float pen = x + run.x16 * k / 16.0f;
+        /* the glyph's coverage of pixel px, py with its picture's top-left at
+         * x0, y0, in 0..16*255 */
+        auto cover = [&](float x0, float y0, int px, int py) {
+            int sum = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++) {
+                    const int gx = (int)std::floor((px + (sx + 0.5f) / 4 - x0) / k);
+                    const int gy = (int)std::floor((py + (sy + 0.5f) / 4 - y0) / k);
+                    if (gx >= 0 && gy >= 0 && gx < gl.w && gy < gl.h)
+                        sum += card_glyph_px(f, gl, gx, gy);
+                }
+            return sum;
+        };
+        /* at a few pixels tall a stroke is about one pixel wide: where it
+         * falls across two it is grey in both. So the glyph moves by less
+         * than half a pixel (eighths) to where its strokes land on whole
+         * pixels: the most full ones, then the most contrast, then the
+         * smallest move */
+        const float tx = pen + gl.x * k, ty = base + gl.y * k;
+        float x0 = tx, y0 = ty;
+        int best_full = -1;
+        double best_sq = -1;
+        float best_move = 1e9f;
+        for (int j = -4; j < 4; j++)
+            for (int i = -4; i < 4; i++) {
+                const float cx0 = tx + i / 8.0f, cy0 = ty + j / 8.0f, move = (float)(i * i + j * j);
+                int full = 0;
+                double sq = 0;
+                for (int py = (int)std::floor(cy0); py < (int)std::ceil(cy0 + gl.h * k); py++)
+                    for (int px = (int)std::floor(cx0); px < (int)std::ceil(cx0 + gl.w * k); px++) {
+                        const int s = cover(cx0, cy0, px, py);
+                        full += s * 255 > 240 * 16 * 255;
+                        sq += (double)s * s;
+                    }
+                if (full > best_full || (full == best_full && (sq > best_sq || (sq == best_sq && move < best_move)))) {
+                    best_full = full;
+                    best_sq = sq;
+                    best_move = move;
+                    x0 = cx0;
+                    y0 = cy0;
+                }
+            }
+        for (int py = (int)std::floor(y0); py < (int)std::ceil(y0 + gl.h * k); py++)
+            for (int px = (int)std::floor(x0); px < (int)std::ceil(x0 + gl.w * k); px++) {
+                const int sum = cover(x0, y0, px, py);
+                if (sum)
+                    c->blend(px, py, r, g, b, sum / (16 * 255.0f));
+            }
+    }
+}
+
+/* The exit's number in the ring of m's icon, drawn size px at ox, oy: small
+ * bold white digits (two narrower), centred on the ring's middle. */
+void draw_ring_number(Canvas *c, const Maneuver &m, int ox, int oy, int size)
+{
+    const float u = size / 48.0f;   /* pixels per unit of the icon */
+    const std::string n = std::to_string(m.exit_number);
+    /* the digits' height: 12 units, 10 for two */
+    const CardGlyph *zero = card_glyph(card_font_distance(), '0');
+    const float h = (n.size() > 1 ? 10.0f : 12.0f) * u, k = zero ? h / zero->h : kSmall;
+    int w = 0;
+    const std::vector<CardRun> runs = card_line(card_font_distance(), n, 999, &w);
+    /* on the ring's middle (ring_centre), mirrored for a clockwise one */
+    const Pt rc = ring_centre(drawn_exit(m.clockwise ? -m.exit_deg : m.exit_deg), true);
+    const float cx = ox + (m.clockwise ? 48 - rc.x : rc.x) * u, cy = oy + rc.y * u;
+    /* the pen and baseline on whole pixels: the same digits, as sharp
+     * (draw_scaled), wherever the ring's middle falls */
+    draw_scaled(c, card_font_distance(), runs, std::floor(cx - w * k / 2), std::floor(cy + h / 2), k, 255, 255, 255);
 }
 
 }  // namespace
@@ -366,6 +516,7 @@ bool maneuver_kind(const std::string &name, Maneuver::Kind *out)
                  {"exit_left", Maneuver::ExitLeft},
                  {"exit_right", Maneuver::ExitRight},
                  {"roundabout", Maneuver::Roundabout},
+                 {"ferry", Maneuver::Ferry},
                  {"arrive", Maneuver::Arrive},
                  {"arrive_left", Maneuver::ArriveLeft},
                  {"arrive_right", Maneuver::ArriveRight},
@@ -400,6 +551,8 @@ void render_turn_card(const Maneuver &m, std::vector<uint8_t> *rgba, bool compac
         /* one line: the arrow smaller, then the distance in bold and the
          * road after it, on one baseline */
         draw_icon(&c, m, 6, 3, 28);
+        if (ring_number(m))
+            draw_ring_number(&c, m, 6, 3, 28);
         const int tx = 42, base = 25, gap = 10;
         int dw = 0;
         const std::vector<CardRun> dist = card_line(df, m.distance, (int)kTurnCardW - tx - 12, &dw);
@@ -410,6 +563,8 @@ void render_turn_card(const Maneuver &m, std::vector<uint8_t> *rgba, bool compac
         return;
     }
     draw_icon(&c, m, 6, 4, 48);
+    if (ring_number(m))
+        draw_ring_number(&c, m, 6, 4, 48);
     /* the text right of the arrow: the distance in bold on top, the road
      * below; the distance alone in the middle */
     const int tx = 62, room = (int)kTurnCardW - tx - 12;
@@ -421,6 +576,117 @@ void render_turn_card(const Maneuver &m, std::vector<uint8_t> *rgba, bool compac
         draw_line(&c, df, dist, tx, 27, 255, 255, 255);
         draw_line(&c, rf, road, tx, 48, 200, 208, 220);
     }
+}
+
+float roundabout_neck(const Maneuver &m)
+{
+    bool mirror = false;
+    const Icon ic = icon_of(m, &mirror);
+    if (m.kind != Maneuver::Roundabout || ic.arcs.empty() || ic.heads.empty())
+        return 0;
+    const Icon::Arc &ring = ic.arcs[0];
+    const Icon::Head &h = ic.heads[0];
+    const Pt base = {(h.a.x + h.b.x) / 2, (h.a.y + h.b.y) / 2};
+    return dist(base, ring.c) - (ring.r + ring.half);
+}
+
+/* The whole pixels between part of m's icon and the digits in its ring. */
+static float digit_gap(const Maneuver &m, const Icon &part, bool mirror, bool compact)
+{
+    const int size = compact ? 28 : 48;
+    std::vector<uint8_t> a((size_t)kTurnCardW * kTurnCardH * 4, 0), d = a;
+    Canvas ca{&a, kTurnCardH}, cd{&d, kTurnCardH};
+    draw_shapes(&ca, part, mirror, 0, 0, size);
+    draw_ring_number(&cd, m, 0, 0, size);
+    std::vector<int> ia, id;
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++) {
+            const size_t i = ((size_t)y * kTurnCardW + x) * 4 + 3;
+            if (a[i] >= 64)
+                ia.push_back(y * size + x);
+            if (d[i] >= 64)
+                id.push_back(y * size + x);
+        }
+    float best = 1e9f;
+    for (int p : ia)
+        for (int q : id) {
+            const float dx = (float)(p % size - q % size), dy = (float)(p / size - q / size);
+            best = std::fmin(best, std::sqrt(dx * dx + dy * dy) - 1);
+        }
+    return best;
+}
+
+float roundabout_digit_clearance(const Maneuver &m, bool compact)
+{
+    if (!ring_number(m))
+        return 1e9f;
+    bool mirror = false;
+    const Icon ic = icon_of(m, &mirror);
+    Icon arm;
+    arm.strokes = {ic.strokes[1]};
+    arm.heads = ic.heads;
+    return digit_gap(m, arm, mirror, compact);
+}
+
+float roundabout_ring_gap(const Maneuver &m, bool compact)
+{
+    if (!ring_number(m))
+        return 1e9f;
+    bool mirror = false;
+    const Icon ic = icon_of(m, &mirror);
+    Icon ring;
+    ring.arcs = {ic.arcs[0]};
+    return digit_gap(m, ring, mirror, compact);
+}
+
+/* A numbered roundabout's pixels at a fault: the stem's or the arm's ink
+ * inside the ring's inner edge; white (heads aside) outside its outer edge
+ * and beyond the stem's and the arm's own widths; or background in the
+ * ring's band or where the arm leaves it. Half a pixel of give. */
+int roundabout_join_faults(const Maneuver &m, bool compact)
+{
+    if (!ring_number(m))
+        return 0;
+    const int size = compact ? 28 : 48;
+    const float k = size / 48.0f, give = 0.5f / k;
+    bool mirror = false;
+    const Icon ic = icon_of(m, &mirror);
+    const Icon::Arc &ring = ic.arcs[0];
+    const Pt c = ring.c, u = bearing(drawn_exit(m.clockwise ? -m.exit_deg : m.exit_deg));
+    Icon straight, white;
+    straight.strokes = ic.strokes;
+    white.strokes = ic.strokes;
+    for (const Icon::Arc &a : ic.arcs)
+        if (!a.grey)
+            white.arcs.push_back(a);
+    std::vector<uint8_t> a((size_t)kTurnCardW * kTurnCardH * 4, 0), w = a, all = a;
+    Canvas ca{&a, kTurnCardH}, cw{&w, kTurnCardH}, cl{&all, kTurnCardH};
+    draw_shapes(&ca, straight, mirror, 0, 0, size);
+    draw_shapes(&cw, white, mirror, 0, 0, size);
+    draw_shapes(&cl, ic, mirror, 0, 0, size);
+    int faults = 0;
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++) {
+            const size_t i = ((size_t)y * kTurnCardW + x) * 4 + 3;
+            const float ux = (x + 0.5f) / k, fy = (y + 0.5f) / k, fx = mirror ? 48 - ux : ux;
+            const float d = dist({fx, fy}, c);
+            if (a[i] >= 64 && d < ring.r - ring.half - give)
+                faults++;
+            const float along = (fx - c.x) * u.x + (fy - c.y) * u.y;
+            const float side = std::fabs((fx - c.x) * u.y - (fy - c.y) * u.x);
+            const bool in_arm = along > 0 && side <= kHalf + give;
+            const bool in_stem = fy > c.y && std::fabs(fx - c.x) <= kHalf + give;
+            if (w[i] >= 64 && d > ring.r + ring.half + give && !in_arm && !in_stem)
+                faults++;
+            /* no background between the arm and the ring: their pixels
+             * all ink, white or grey */
+            const bool band = d > ring.r - ring.half + give && d < ring.r + ring.half - give;
+            const bool root = along > 0 && side < kHalf - give && d > ring.r - ring.half + give &&
+                              d < ring.r + ring.half + give;
+            if ((band || root) && all[i] < 64)
+                faults++;
+        }
+    return faults;
 }
 
 }  // namespace woc

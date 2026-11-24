@@ -127,11 +127,15 @@ shows and hides with the map, on the map slot only (not while
 hosted, not on the HUD). The app's **Turn card** sets where, kept in
 `turn_card_state_file`. The arrows follow BMW's own: a heavy white way to
 go, the roads not taken (a fork's other branch, the motorway left, a
-roundabout's ring) grey. The text is antialiased Roboto drawn ahead of time
+roundabout's ring) grey; a roundabout driven round clockwise (where
+traffic keeps left) is drawn that way, and a ferry is a boat. The text is antialiased Roboto drawn ahead of time
 (`src/card_font.h`, `tools/card_font.py`; Apache License 2.0,
 `LICENSES/Apache-2.0.txt`), with Latin, Greek and Cyrillic letters; a line
-that does not fit ends in an ellipsis. `make build/host/turn_card_preview`
-writes every kind of card as one picture.
+that does not fit ends in an ellipsis. A roundabout's exit number is in its
+ring, in small bold digits, the route box's own (a U-turn round it, which
+CarPlay sends as exit 0, gets an empty ring); the arrow and the number never
+come from the text. `make build/host/turn_card_preview` writes every kind of
+card as one picture.
 
 What it shows is the BMW navigation's next manoeuvre as the cluster's route
 box has it, CarPlay's guidance included (`guidance = 1`): the tool reads
@@ -139,11 +143,16 @@ GuidanceEventList (SOME/IP 0xFB1B, event 0x8002) as uid 5000, the way the
 HMI does, and only reads (`src/guidance_link.h`, `src/route_box.h`). Each
 of its events is a kind (a turn, a fork, a roundabout, the destination, an
 empty slot) and a direction: a turn's straight on, left, slight, sharp,
-right or U-turn, a fork's keep left or right, a roundabout's exit (its angle
-and number), the destination's side. Distances come in metres or
-kilometres. A kind not seen on a drive yet (a ferry, a motorway entry) gets
-a plain mark, with the distance and road still shown, and the log names its
-number once, never the road. The box empties now and then while the
+right or U-turn (over the left, or over the right where traffic keeps
+left), a fork's keep left or right (a motorway's on ramps too) or exit left
+or right, a roundabout's exit (its angle and number) and side, a ferry,
+the destination's side. Distances come in metres or kilometres, or yards,
+miles and feet, as the phone sends them. These are read the same for every
+car. The values beyond the turns, forks and
+roundabouts seen on a drive where traffic keeps right are those the head
+unit's carplay sends (`src/route_box.h`), not yet seen in a route box on a
+drive. Any other value gets a plain mark, with the distance and road still
+shown, and the log names its number once, never the road. The box empties now and then while the
 navigation guides (a route's start, a recalculation); the tool also reads
 whether it guides (Guidance 0xFB1A, event 0x8015), and while it does the
 card keeps an instruction with no distance (the way out) through those

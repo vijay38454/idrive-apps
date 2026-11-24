@@ -125,6 +125,12 @@ public:
                     m.road = msg.at("road");
                 if (msg.count("exit"))
                     m.exit_deg = (int)std::strtol(msg.at("exit").c_str(), nullptr, 10) % 360;
+                /* a roundabout driven round clockwise, its exit's number
+                 * (turn_card.h) */
+                if (msg.count("clockwise"))
+                    m.clockwise = msg.at("clockwise") == "1";
+                if (msg.count("number"))
+                    m.exit_number = (int)std::strtol(msg.at("number").c_str(), nullptr, 10);
                 choice_.set_example(m, now_ms());
                 show_maneuver();
             }

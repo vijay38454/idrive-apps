@@ -10,8 +10,10 @@
  * arrow smaller and the distance and road side by side on one line. The
  * arrows are drawn as BMW's own are: a heavy white way to
  * go, the roads not taken grey, a right-hand kind the mirror of its
- * left-hand one. The text is antialiased Roboto (card_font.h), accents and
- * all; a line that does not fit ends in an ellipsis. */
+ * left-hand one, a roundabout driven round clockwise the mirror of one
+ * driven round anticlockwise; a roundabout's exit number (1 to 19) is in its
+ * ring, in small bold digits. The text is antialiased Roboto (card_font.h),
+ * accents and all; a line that does not fit ends in an ellipsis. */
 #ifndef WOC_TURN_CARD_H
 #define WOC_TURN_CARD_H
 
@@ -51,6 +53,7 @@ struct Maneuver {
         ExitLeft,     /* off a motorway to the left, the motorway grey */
         ExitRight,
         Roundabout,   /* the ring, and its exit at exit_deg */
+        Ferry,        /* a ferry or a car train: a boat on the water */
         Arrive,       /* the destination: a flag */
         ArriveLeft,   /* the destination on the left of the road */
         ArriveRight,
@@ -59,14 +62,17 @@ struct Maneuver {
     Kind kind = None;
     /* Roundabout: where its exit leads, in degrees clockwise from straight
      * ahead (-90 left, 0 straight on, 90 right, 180 back), driven round
-     * anticlockwise as where traffic keeps right */
+     * anticlockwise as where traffic keeps right, or clockwise */
     int exit_deg = 0;
-    std::string distance;   /* as shown: "200 m" */
-    std::string road;       /* the road after the manoeuvre, or its description */
+    bool clockwise = false;   /* Roundabout: driven round clockwise, as where traffic keeps left */
+    int exit_number = 0;      /* Roundabout: 1 the first exit, in its ring; 0 not known, none */
+    std::string distance;     /* as shown: "200 m" */
+    std::string road;         /* the road after the manoeuvre, or its description */
 
     bool operator==(const Maneuver &o) const
     {
-        return kind == o.kind && exit_deg == o.exit_deg && distance == o.distance && road == o.road;
+        return kind == o.kind && exit_deg == o.exit_deg && clockwise == o.clockwise &&
+               exit_number == o.exit_number && distance == o.distance && road == o.road;
     }
     bool operator!=(const Maneuver &o) const { return !(*this == o); }
 };
@@ -77,6 +83,23 @@ struct Maneuver {
  * "roundabout", "arrive", "arrive_left", "arrive_right", "other", "none");
  * false for another name. */
 bool maneuver_kind(const std::string &name, Maneuver::Kind *out);
+
+/* A roundabout's neck: from its ring's outer edge to its exit's head, along
+ * the exit, in the icon's units (a full card's pixels; 28/48 of them on the
+ * compact card); 0 for another kind. */
+float roundabout_neck(const Maneuver &m);
+/* The whole pixels between a numbered roundabout's exit arm (and head) and
+ * the digits in its ring, on the full or compact card; large without a
+ * number. For the tests. */
+float roundabout_digit_clearance(const Maneuver &m, bool compact);
+/* The whole pixels between a numbered roundabout's digits and its ring;
+ * large without a number. For the tests. */
+float roundabout_ring_gap(const Maneuver &m, bool compact);
+/* A numbered roundabout's pixels where the stem or arm shows inside the
+ * ring's hole, white bulges outside the ring beyond their own widths, or
+ * background shows where the arm meets the ring; 0 without a number. For
+ * the tests. */
+int roundabout_join_faults(const Maneuver &m, bool compact);
 
 /* The card for m as kTurnCardW * kTurnCardH * 4 bytes of RGBA; compact,
  * kTurnCardW * kTurnCardCompactH, all on one line. */
