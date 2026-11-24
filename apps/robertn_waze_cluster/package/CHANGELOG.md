@@ -3,8 +3,9 @@
 ## Unreleased
 
 **Turn card** (Off, Below the arrow or At the top) draws the next manoeuvre
-over the cluster map; **Show an example** shows one for 10 seconds.
-Requires the waze-on-cluster released with it.
+over the cluster map; **Show an example** shows one for 10 seconds. While
+it is on, the iPhone draws no turn card of its own on the cluster map;
+changing it reconnects CarPlay. Requires the waze-on-cluster released with it.
 
 ## 0.6.17
 

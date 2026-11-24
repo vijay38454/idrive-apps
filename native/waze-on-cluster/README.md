@@ -141,7 +141,11 @@ position arrow and the street name it writes there, compact (all on one
 line); at the top of the map, on two lines; or none (the default). It
 shows and hides with the map, on the map slot only (not while
 hosted, not on the HUD). The app's **Turn card** sets where, kept in
-`turn_card_state_file`. The arrows follow BMW's own: a heavy white way to
+`turn_card_state_file`. While it shows, CarPlay's patch asks the phone for
+the map alone, so a phone that draws a turn card of its own (Apple Maps)
+does not draw a second one; its arrival-time card goes too. A change of
+the setting restarts CarPlay where the tool may, so the phone follows it at
+once, else from CarPlay's next start (PATCH.md, Edit 6). The arrows follow BMW's own: a heavy white way to
 go, the roads not taken (a fork's other branch, the motorway left, a
 roundabout's ring) grey. The text is antialiased Roboto drawn ahead of time
 (`src/card_font.h`, `tools/card_font.py`; Apache License 2.0,
