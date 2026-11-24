@@ -5,6 +5,12 @@
 **Turn card** (Off, Below the arrow or At the top) draws the next manoeuvre
 over the cluster map; **Show an example** shows one for 10 seconds.
 Requires the waze-on-cluster released with it.
+## 0.6.16
+
+Android Auto: Patch, Remove patch, Zoom and Hide phone's turn card can be
+changed again while a change waits for the head-unit restart; one restart
+applies the last choice. The cluster map row stays on while Android Auto
+still runs its patch until that restart.
 
 ## 0.6.15
 

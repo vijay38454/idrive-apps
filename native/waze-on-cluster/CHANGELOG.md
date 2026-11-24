@@ -15,6 +15,14 @@ number in its ring (none for a U-turn round it). Anything else still gets
 the plain mark. The arrow and the number come from the route box's values,
 never from the text. The values where traffic keeps left are not yet tried
 on a drive.
+## 0.14.14
+
+Android Auto: Patch, Remove patch, Zoom and the turn card take effect at
+the next head-unit start (**Restart head unit**), so Android Auto's
+touchscreen and iDrive controller keep working after them. Several can be
+changed before that restart; changing one back to what already runs leaves
+nothing waiting.
+
 ## 0.14.13
 
 The patch and recovery services run in the head unit's slice for standard
