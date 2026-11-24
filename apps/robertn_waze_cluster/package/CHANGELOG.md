@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Turn card** (Off, Below the arrow or At the top) draws the next manoeuvre
+over the cluster map; **Show an example** shows one for 10 seconds.
+Requires the waze-on-cluster released with it.
+
 ## 0.6.15
 
 When boot recovery removes the Android Auto patch because Android Auto
