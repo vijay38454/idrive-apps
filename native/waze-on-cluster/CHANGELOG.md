@@ -15,6 +15,22 @@ number in its ring (none for a U-turn round it). Anything else still gets
 the plain mark. The arrow and the number come from the route box's values,
 never from the text. The values where traffic keeps left are not yet tried
 on a drive.
+## 0.14.13
+
+The patch and recovery services run in the head unit's slice for standard
+services, and the journal keeper in its slice for background work, so none
+of them takes CPU time ahead of the HMI.
+
+## 0.14.12
+
+The tests build with the cluster renderer's iDrive 7 log-level handling
+left out, as the map feed test does not use it. Nothing changes on the car.
+
+## 0.14.11
+
+The map's frames go to the cluster renderer through shared memory where
+the renderer takes them, which takes less CPU for each frame. The receive
+and decode threads wait without waking while no stream comes.
 
 ## 0.14.10
 
