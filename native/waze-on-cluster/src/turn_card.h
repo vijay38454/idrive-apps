@@ -100,6 +100,12 @@ float roundabout_ring_gap(const Maneuver &m, bool compact);
  * background shows where the arm meets the ring; 0 without a number. For
  * the tests. */
 int roundabout_join_faults(const Maneuver &m, bool compact);
+/* A numbered roundabout's bump where the arm meets its ring: on the arm's
+ * side away from the way round, in the ring's band near the exit, the
+ * farthest pixel (in pixels) from the arm's straight edge carried through
+ * the band whose white is off by a quarter or more; 0 for a clean join or
+ * without a number. For the tests. */
+float roundabout_join_bump(const Maneuver &m, bool compact);
 
 /* The card for m as kTurnCardW * kTurnCardH * 4 bytes of RGBA; compact,
  * kTurnCardW * kTurnCardCompactH, all on one line. */

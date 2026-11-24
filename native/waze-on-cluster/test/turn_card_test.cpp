@@ -323,10 +323,12 @@ int main()
     }
     /* a numbered ring: the stem and the arm join its band cleanly, nothing
      * of either in its hole, nothing outside it wider than their own width,
-     * no background where the arm meets the ring, both cards, every exit,
-     * both ways round */
+     * no background where the arm meets the ring, its far edge one straight
+     * line through the band (no bump), both cards, every exit, both ways
+     * round */
     {
         int faults = 0;
+        float bump = 0;
         Maneuver r;
         r.kind = Maneuver::Roundabout;
         for (int cw = 0; cw < 2; cw++)
@@ -336,8 +338,11 @@ int main()
                     r.exit_deg = a;
                     r.exit_number = n;
                     faults += roundabout_join_faults(r, false) + roundabout_join_faults(r, true);
+                    bump = std::fmax(bump, std::fmax(roundabout_join_bump(r, false), roundabout_join_bump(r, true)));
                 }
         ok("a numbered ring: no stem or arm in its hole, no bulge beside them, no notch", faults == 0);
+        std::printf("     the join's bump: %.2f px\n", bump);
+        ok("a numbered ring: the arm's far edge one straight line through the band, no bump", bump == 0);
     }
     {
         std::vector<uint8_t> boat, low;

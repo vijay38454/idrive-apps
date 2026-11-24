@@ -82,6 +82,8 @@ struct Icon {
         float r, half;
         float from, to;   /* bearings: the arc covers from..to clockwise */
         bool grey;
+        float cut = 0;      /* > 0: no ink farther than this along cut_n from c */
+        Pt cut_n = {0, 0};
     };
     struct Box {
         float x0, y0, x1, y1;
@@ -182,13 +184,18 @@ void roundabout(Icon *ic, int exit_deg, bool numbered)
     const float r = numbered ? 12 : 10, ring = 2.6f, arm = numbered ? 4.1f : 3;
     /* numbered: the stem from the middle, cut at the band's inner edge; the
      * arm's round end cut at the centre line where it is as wide as the
-     * ring's band */
+     * ring's band, the way round carried past the exit to the arm's far
+     * edge (below) */
     const float clip = numbered ? r - ring : 0;
     const float start = numbered ? r + std::sqrt(kHalf * kHalf - ring * ring) : r;
     ic->arcs.push_back({c, r, ring, 0, 360, true});
     ic->strokes.push_back({{{c.x, 47}, {c.x, c.y + (numbered ? 0 : r)}}, kHalf, false, clip, c});
     /* anticlockwise from the foot (bearing 180) down to e */
     ic->arcs.push_back({c, r, ring, e, 180, false});
+    /* numbered: the arm's far edge one straight line through the band to
+     * its inner edge, the band white up to it (no bump, no step) */
+    if (numbered)
+        ic->arcs.push_back({c, r, ring, e - 30, e, false, kHalf, bearing(e - 90)});
     const Pt u = bearing(e);
     const Pt s = {c.x + u.x * start, c.y + u.y * start}, b = {c.x + u.x * (r + arm), c.y + u.y * (r + arm)};
     ic->strokes.push_back({{s, b}, kHalf, false, numbered ? r : 0, c});
@@ -361,7 +368,12 @@ void draw_shapes(Canvas *c, const Icon &ic, bool mirror, int ox, int oy, int siz
                 white = cov > white ? cov : white;
             }
             for (const Icon::Arc &a : ic.arcs) {
-                const float cov = edge(arc_in(fx, fy, a) * k);
+                float in = arc_in(fx, fy, a);
+                if (a.cut > 0) {
+                    const float out = a.cut - ((fx - a.c.x) * a.cut_n.x + (fy - a.c.y) * a.cut_n.y);
+                    in = out < in ? out : in;
+                }
+                const float cov = edge(in * k);
                 float &dst = a.grey ? grey : white;
                 dst = cov > dst ? cov : dst;
             }
@@ -690,6 +702,48 @@ int roundabout_join_faults(const Maneuver &m, bool compact)
                 faults++;
         }
     return faults;
+}
+
+float roundabout_join_bump(const Maneuver &m, bool compact)
+{
+    if (!ring_number(m))
+        return 0;
+    const int size = compact ? 28 : 48;
+    const float k = size / 48.0f;
+    bool mirror = false;
+    const Icon ic = icon_of(m, &mirror);
+    const Icon::Arc &ring = ic.arcs[0];
+    const float e = drawn_exit(m.clockwise ? -m.exit_deg : m.exit_deg);
+    const Pt c = ring.c, u = bearing(e), n = bearing(e - 90);
+    Icon white = ic;
+    white.arcs.clear();
+    for (const Icon::Arc &a : ic.arcs)
+        if (!a.grey)
+            white.arcs.push_back(a);
+    for (Icon::Stroke &s : white.strokes)
+        s.grey = false;
+    white.boxes.clear();
+    std::vector<uint8_t> w((size_t)kTurnCardW * kTurnCardH * 4, 0);
+    Canvas cw{&w, kTurnCardH};
+    draw_shapes(&cw, white, mirror, 0, 0, size);
+    float worst = 0;
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++) {
+            const float ux = (x + 0.5f) / k, fy = (y + 0.5f) / k, fx = mirror ? 48 - ux : ux;
+            const float dx = fx - c.x, dy = fy - c.y, d = std::sqrt(dx * dx + dy * dy);
+            const float along = dx * u.x + dy * u.y, side = dx * n.x + dy * n.y;
+            /* the join: the band (half a pixel in from its edges), within
+             * 40 degrees of the exit, on the arm's far side */
+            const float give = 0.5f / k;
+            if (along < d * 0.766f || side <= 0 || d < ring.r - ring.half + give || d > ring.r + ring.half - give)
+                continue;
+            if (fy > c.y && std::fabs(fx - c.x) < kHalf + give)   /* the stem, where the exit is near it */
+                continue;
+            const float ideal = edge((kHalf - side) * k), got = w[((size_t)y * kTurnCardW + x) * 4 + 3] / 255.0f;
+            if (std::fabs(got - ideal) >= 0.25f)
+                worst = std::fmax(worst, std::fabs(kHalf - side) * k);
+        }
+    return worst;
 }
 
 }  // namespace woc
