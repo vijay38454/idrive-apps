@@ -58,6 +58,19 @@ void read_event(const uint8_t *d, size_t n, RouteBoxEvent *e)
     const std::vector<Str> ss = strings(d, n);
     if (ss.empty())
         return;
+    if (e->kind == kRouteBoxFerry) {
+        /* GuidancePanelWithRange: its length's formatted distance after the
+         * text; the text the string 24 bytes after the distance's, no
+         * direction after it */
+        for (size_t i = ss.size(); i-- > 1;)
+            if (ss[i].start >= 24 && ss[i - 1].end == ss[i].start - 24) {
+                e->text = ss[i].text;
+                e->distance = ss[i - 1].text;
+                e->unit = u32_at(d + ss[i].start - 24);
+                break;
+            }
+        return;
+    }
     const Str &t = ss.back();
     e->text = t.text;
     /* the distance string ends 24 bytes before the text: unit, a f64 and
@@ -156,18 +169,30 @@ Maneuver::Kind kind_of_event(uint32_t kind, uint32_t direction)
         case 5: return Maneuver::Right;
         case 6: return Maneuver::SlightRight;
         case 7: return Maneuver::SharpRight;
-        case 8:   /* carplay's U-turns, not seen in the route box yet */
-        case 9: return Maneuver::UTurn;   /* a U-turn where traffic keeps right */
+        case 8: return Maneuver::UTurnRight;   /* UTURN_RIGHT: where traffic keeps left */
+        case 9: return Maneuver::UTurn;        /* UTURN_LEFT: where traffic keeps right */
         default: return Maneuver::Other;
         }
     }
-    if (kind == kRouteBoxFork)
-        return direction == 1 ? Maneuver::KeepLeft : direction == 2 ? Maneuver::KeepRight : Maneuver::Other;
-    /* drawn anticlockwise: where traffic keeps right only */
+    if (kind == kRouteBoxFork) {
+        switch (direction) {
+        case 1:   /* BRANCH_LEFT: keep left, change motorway, an off ramp */
+        case 9: return Maneuver::KeepLeft;   /* FORK_LEFT: an on ramp */
+        case 2:
+        case 10: return Maneuver::KeepRight;
+        case 6: return Maneuver::ExitLeft;   /* HIGHWAY_OUT_LEFT */
+        case 7: return Maneuver::ExitRight;
+        default: return Maneuver::Other;
+        }
+    }
+    /* 2: round it anticlockwise, where traffic keeps right; 1 clockwise */
     if (kind == kRouteBoxRoundabout)
-        return direction == 2 ? Maneuver::Roundabout : Maneuver::Other;
+        return direction == 1 || direction == 2 ? Maneuver::Roundabout : Maneuver::Other;
     if (kind == kRouteBoxDestination)
         return direction == 1 ? Maneuver::ArriveLeft : direction == 3 ? Maneuver::ArriveRight : Maneuver::Arrive;
+    /* VehicleTransportation: a ferry (CarPlay's ferries; its car train too) */
+    if (kind == kRouteBoxFerry)
+        return Maneuver::Ferry;
     return Maneuver::Other;
 }
 
@@ -184,12 +209,20 @@ std::string route_box_distance(const std::string &distance, uint32_t unit)
 {
     if (blank(distance))
         return std::string();
-    return unit == 4 ? distance + " m" : unit == 1 ? distance + " km" : distance;
+    switch (unit) {
+    case 1: return distance + " km";
+    case 2:   /* MILE_UK */
+    case 3: return distance + " mi";   /* MILE_US: carplay's for a phone's miles */
+    case 4: return distance + " m";
+    case 5: return distance + " yd";
+    case 6: return distance + " ft";
+    default: return distance;
+    }
 }
 
 bool unit_known(uint32_t unit)
 {
-    return unit == 0 || unit == 1 || unit == 4;
+    return unit <= 6;
 }
 
 bool route_box_maneuver(const std::vector<RouteBoxEvent> &events, Maneuver *out)
@@ -207,10 +240,14 @@ bool route_box_maneuver(const std::vector<RouteBoxEvent> &events, Maneuver *out)
     Maneuver m;
     m.kind = kind_of_event(e.kind, e.direction);
     if (m.kind == Maneuver::Roundabout) {
-        if (e.exit_angle >= 1 && e.exit_angle <= 360)
+        if (e.exit_angle >= 1 && e.exit_angle <= 360) {
             m.exit_deg = e.exit_angle > 180 ? e.exit_angle - 360 : e.exit_angle;
-        else
+            m.clockwise = e.direction == 1;
+            /* 0 (a U-turn round it, as CarPlay sends it): none */
+            m.exit_number = e.exit_number;
+        } else {
             m.kind = Maneuver::Other;
+        }
     }
     m.distance = route_box_distance(e.distance, e.unit);
     m.road = road_text(e.text);
