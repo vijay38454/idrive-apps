@@ -391,7 +391,10 @@ void draw_shapes(Canvas *c, const Icon &ic, bool mirror, int ox, int oy, int siz
 void draw_icon(Canvas *c, const Maneuver &m, int ox, int oy, int size)
 {
     bool mirror = false;
-    draw_shapes(c, icon_of(m, &mirror), mirror, ox, oy, size);
+    /* the icon first: icon_of sets mirror, and a call's arguments are
+     * evaluated in no set order (g++ from the right) */
+    const Icon ic = icon_of(m, &mirror);
+    draw_shapes(c, ic, mirror, ox, oy, size);
 }
 
 /* runs of f with the pen at x, the baseline at y */
