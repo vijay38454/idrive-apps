@@ -47,6 +47,15 @@ Android Auto is patched on aapd builds without the place where the map
 is asked for as the phone sets the cluster display up. There, the map
 does not come back after the phone reconnects until a route starts it.
 
+The turn card reads more of the route box, for every car: yards, miles and
+feet as well as metres and kilometres, a U-turn back over the right and
+roundabouts driven round clockwise where traffic keeps left, a motorway's
+on ramps, exits left and right, ferries (a boat), and a roundabout's exit
+number in its ring (none for a U-turn round it). Anything else still gets
+the plain mark. The arrow and the number come from the route box's values,
+never from the text. The values where traffic keeps left are not yet tried
+on a drive.
+
 ## 0.14.18
 
 On a car not coded for the CarPlay cluster map, a map patch that CarPlay's
