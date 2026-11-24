@@ -135,6 +135,7 @@ class FakeRender extends LineServer {
         this.hudState = null;
         /* the HUD map kept shown over BMW's pop-ups (null: a tool without the field) */
         this.hudKeep = 0;
+        this.turnCard = 'off';   /* null: a tool without the turn card */
         this._showTimer = null;
     }
 
@@ -161,6 +162,8 @@ class FakeRender extends LineServer {
                 hud_width_pct: this.hudWidth || 0, hud_x: this.hudX || 0, hud_y: this.hudY || 0 });
             if (this.hudKeep !== null) s.hud_keep_shown = this.hudKeep;
         }
+        /* turnCard null: a tool without the turn card */
+        if (this.turnCard !== null && this.turnCard !== undefined) s.turn_card = this.turnCard;
         if (this.hide !== null) {
             s.hide_bmw_guidance = this.hide;
             s.guide_disabled = this.guideDisabled;
@@ -196,6 +199,13 @@ class FakeRender extends LineServer {
         if (msg.cmd === 'cluster' && msg.on !== undefined) {
             this.cluster = Number(msg.on);
             this._broadcast(this._status());
+        }
+        if (msg.cmd === 'turn_card' && ['off', 'bottom', 'top'].indexOf(msg.mode) >= 0 && this.turnCard) {
+            this.turnCard = msg.mode;
+            this._broadcast(this._status());
+        }
+        if (msg.cmd === 'maneuver') {
+            this.maneuvers = (this.maneuvers || []).concat([msg]);
         }
         if (msg.cmd === 'hud') {
             if (msg.on !== undefined) this.hud = Number(msg.on);

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+A turn card can show the next manoeuvre over the cluster map, below the
+position arrow or at the top, while the BMW navigation guides, CarPlay's
+guidance included: a turn, a fork, a roundabout's exit or the destination,
+with the distance and the road. It is off unless turned on in the app.
+
+The turn card reads more of the route box, for every car: yards, miles and
+feet as well as metres and kilometres, a U-turn back over the right and
+roundabouts driven round clockwise where traffic keeps left, a motorway's
+on ramps, exits left and right, ferries (a boat), and a roundabout's exit
+number in its ring (none for a U-turn round it). Anything else still gets
+the plain mark. The arrow and the number come from the route box's values,
+never from the text. The values where traffic keeps left are not yet tried
+on a drive.
 ## 0.14.14
 
 Android Auto: Patch, Remove patch, Zoom and the turn card take effect at

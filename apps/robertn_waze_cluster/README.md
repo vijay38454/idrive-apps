@@ -63,6 +63,10 @@ The app is in the head unit's display language.
   keeps its own Show on, HUD size and HUD position.
 - **Hide BMW's turn box:** ticked (the default), BMW's turn-by-turn box on
   the cluster is hidden while the map shows.
+- **Turn card:** the next manoeuvre (arrow, distance, road) drawn over the
+  cluster map: **Off** (the default), **Below the arrow** or **At the top**.
+- **Show an example:** an example turn card on the cluster for 10 seconds,
+  to see where it sits.
 - **Logs:** opens the Logs page (see below).
 
 **HUD**
