@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+A hold that yields to BMW's own content in its slot (the rear seat-belt
+panel, which comes and goes on its own) no longer counts that as a loss,
+so it no longer gives up over it. A hold that has given up is asked for
+again when the target it follows lets it hold again (Hide BMW's turn box
+off and on), without a restart.
+
 ## 0.8.13
 
 The service runs in the head unit's slice for standard services, level
