@@ -1236,6 +1236,10 @@ int64_t SlotManager::small_ready_ms(int i, int64_t now_ms) const
         int64_t sub = INT64_MAX;
         for (const auto &kv : s->second)
             sub = std::min(sub, kv.second.since_ms);
+        /* Subscribed kSmallTakeOverSettleMs or longer when parked (kept
+         * fetched through a lock, car Test 5f): no settle, at once. */
+        if (t.since_ms - sub >= kSmallTakeOverSettleMs)
+            return t.since_ms;
         from = std::max(from, sub);
     } else if (sub_lines_ && watching(t, now_ms)) {
         return -1;   /* its renderer not subscribed yet */

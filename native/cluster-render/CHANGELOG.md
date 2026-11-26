@@ -37,6 +37,12 @@ the upload cap or the remembered ceiling: they upload nothing, so the map
 keeps 5500 KB/s after a warning instead of being slowed to 5000 and
 remembered at 5000 for later drives. The map's removals count as before.
 
+When a warning comes on, BMW's top layout (0x01000314) no longer shows for
+~0.3 s after the lock of slot 0x103 ends: our small scene kept fetched
+through the lock, its renderer subscribed long before, takes it over as
+soon as it is parked again, without the 300 ms wait meant for a fresh
+subscription (which still waits it).
+
 A hold that yields to BMW's own content in its slot (content not in
 `guide_take_over`) no longer counts that as a loss, so it no longer gives
 up over it. A hold that has given up is asked for again when the target

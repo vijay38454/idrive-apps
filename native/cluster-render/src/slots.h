@@ -212,7 +212,8 @@
  *   behind it is no loss and no take-over. The small one takes over at
  *   most kSmallTakeOvers times until it is shown or asked for again,
  *   each once it has been parked and its renderer subscribed
- *   kSmallTakeOverSettleMs, the 1.5 s spacing kept. A hold that has a
+ *   kSmallTakeOverSettleMs (at once when parked with its renderer
+ *   subscribed that long already), the 1.5 s spacing kept. A hold that has a
  *   small scene it may ask for does not yield to take_over_contents of
  *   the small one's class; one without (none, given up, refused) does.
  *   When the first of kWarningSlots comes back (status 0 to 1) while a
@@ -494,7 +495,10 @@ public:
     /* A hold's small scene (TargetSpec::pairs_with) takes over only once it
      * is parked and its renderer subscribed (when that can be read), this
      * long after the later of the two, so the KOMBI can show ours when the
-     * HMI's goes; and at most kSmallTakeOvers times, on the kTakeOverMs[]
+     * HMI's goes; at once when parked with its renderer subscribed this
+     * long already (kept fetched through a lock, car Test 5f, 26 Nov
+     * 16:54:21: the wait only let the top card show); and at most
+     * kSmallTakeOvers times, on the kTakeOverMs[]
      * steps, from being asked for until it is released or shown (car Test
      * 5b, 26 Nov: unmaps sent within 60 ms of ours mapped did nothing, or
      * the HMI's was mapped again in front). */
@@ -886,8 +890,9 @@ private:
     void park(int i, int64_t now_ms);
     void charge_resend(int i, int64_t now_ms);
     void take_over(int i, int64_t now_ms);
-    /* A small scene's take-over may go from then on (kSmallTakeOverSettleMs);
-     * -1: not yet (not parked, or its renderer not subscribed). */
+    /* A small scene's take-over may go from then on (kSmallTakeOverSettleMs,
+     * none when subscribed that long when parked); -1: not yet (not parked,
+     * or its renderer not subscribed). */
     int64_t small_ready_ms(int i, int64_t now_ms) const;
     /* Accepted, not mapped for kNotMappedMs: released and asked for again. */
     void not_mapped(int i, int64_t now_ms);

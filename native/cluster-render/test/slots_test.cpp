@@ -3029,6 +3029,76 @@ static void guide_small_race()
            apple.find("take-over") == std::string::npos);
 }
 
+/* Issue 281, part 4g: car Test 5f, 16:54:21.432-21.780. The small scene,
+ * its renderer subscribed minutes before, kept fetched through a lock of
+ * 0x103; the slot back, ours mapped again and parked, the top layout
+ * shown 1 ms later: taken over at once, not 300 ms later (the settle is for
+ * a fresh subscription, part 4b's case, which still waits it). */
+static void guide_small_kept_no_settle()
+{
+    PairRig r(kTopSlot);
+    r.port.keeps = true;
+    r.crows(kTopSlot, 1, {});
+    r.show_map();
+    r.m.on_subscription(kMapScene, true, false, kRenderer, r.now);
+    r.pass();
+    r.m.on_subscription(kGuideScene, true, false, kRenderer, r.now);
+    r.m.on_subscription(kSmallScene, true, false, kRenderer, r.now);
+    r.table(3, 3, 0, 0);
+    r.m.on_parked(kGuideScene, r.now);
+    r.m.on_parked(kSmallScene, r.now);
+    r.pass();
+    r.table(1, 3, 3, 3);
+    r.m.on_shown(kGuideScene, r.now);
+    r.pass(10000);
+    /* The warning: 0x103 locked, ours kept fetched. */
+    r.warning(true);
+    r.crows(kTopSlot, 0, {{kGuideScene, 1, 0}, {kSmallScene, 3, 1024}, {kBox, 0, 0}, {kBelt, 0, 1024}});
+    r.pass();
+    r.m.on_lost(kSmallScene, "unmapped", r.now);
+    r.m.on_lost(kGuideScene, "unmapped", r.now);
+    r.pass(6040);
+    const bool kept = r.m.kept(PairRig::kSmall) && joined().find("release guide_small") == std::string::npos;
+    logged();
+    /* 16:54:21.432: back; .470 both parked; .471 the top layout shown. */
+    r.crows(kTopSlot, 1, {{kGuideScene, 0, 0}, {kSmallScene, 0, 1024}, {kBox, 0, 0}, {kBelt, 0, 1024}});
+    r.pass(40);
+    r.crows(kTopSlot, 1, {{kGuideScene, 3, 0}, {kSmallScene, 3, 1024}, {kBox, 3, 0}, {kBelt, 0, 1024}});
+    r.m.on_parked(kGuideScene, r.now);
+    r.m.on_parked(kSmallScene, r.now);
+    r.pass();
+    const std::string parked = joined();
+    r.crows(kTopSlot, 2, {{kGuideScene, 3, 0}, {kSmallScene, 3, 1024}, {kBox, 3, 0}, {kBelt, 1, 1024}});
+    r.pass();
+    ok("t5f 16:54:21.471: kept through the lock, subscribed long before: the top layout taken over at once",
+       kept && parked.find("take over guide_small") == std::string::npos &&
+           unpolled(joined()) == "take over guide_small 0x1000314" &&
+           logged().find("target guide_small: take-over 1") != std::string::npos);
+    r.pass(300);
+    ok("one take-over, not a second at the old settle", count(joined(), "take over guide_small") == 0);
+
+    /* Part 4b's case, a fresh fetch: subscribed 200 ms before parked: the
+     * settle still waits, 300 ms after the later of the two. */
+    PairRig f;
+    f.warning(true);
+    f.crows(kTopSlot, 2, {{kBox, 3, 0}, {kBelt, 1, 1024}});
+    f.show_map();
+    f.m.on_subscription(kMapScene, true, false, kRenderer, f.now);
+    f.pass();
+    f.m.on_subscription(kGuideScene, true, false, kRenderer, f.now);
+    f.m.on_subscription(kSmallScene, true, false, kRenderer, f.now);
+    f.pass(200);
+    f.table(3, 3, 3, 1);
+    f.m.on_parked(kGuideScene, f.now);
+    f.m.on_parked(kSmallScene, f.now);
+    joined();
+    f.pass(290);
+    const std::string early = unpolled(joined());
+    f.pass(20);
+    ok("subscribed 200 ms before parked: the take-over 300 ms after parked, not before",
+       early.empty() && unpolled(joined()) == "take over guide_small 0x1000314");
+}
+
 /* Issue 281, part 4c: the small scene stays ready all the time. Mapped
  * while the map is shown and Hide is ticked, the box there or not; in 0x103
  * until the box is seen, then in the box's slot; released only when the
@@ -5528,6 +5598,7 @@ int main()
     guide_hold_ready();
     guide_removal_not_evidence();
     guide_small_race();
+    guide_small_kept_no_settle();
     guide_small_ready();
     guide_given_up_held_again();
     guide_not_mapped();
