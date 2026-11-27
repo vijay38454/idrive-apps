@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+CarPlay: the phone's own turn card sits small at the very top of the
+cluster map, and the arrival-time bar is gone from the cluster. A car
+patched before shows `Update needed`; pressing CarPlay's Patch button
+plans it, with nothing to type. Requires the next waze-on-cluster.
+
 CarPlay: Apple's turn card sits at the top of the cluster map instead of
 over its middle. A car patched before shows `Update needed`; pressing
 CarPlay's Patch button moves the card up after the head-unit restart.

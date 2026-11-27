@@ -135,9 +135,10 @@ function targets(o) {
             inmem: true,
             /* our edits in the file beside another change (a conflict) */
             foreignIn: function () { return require('./carplay_patch.js').foreignIn(o.carplay); },
-            /* the plan's arguments for a patch in the file put back (drec, its record) */
+            /* the plan's arguments for a patch in the file put back (drec, its record),
+             * with the high panel's cluster setup, as patchd plans it */
             planArgs: function (drec) {
-                return ['--panel', 'high', '--coding', CODING];
+                return require('./carplay_patch.js').defaultArgs(['--panel', 'high', '--coding', CODING]);
             },
             check: function (i, cur) {
                 if (!exists(o.carplay + '.woc-orig')) return null;

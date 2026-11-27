@@ -345,6 +345,11 @@ and keeps its UI, such as the manoeuvre banner, inside the safe area; a car
 capture of the stock geometry shows exactly that. With a full-frame safe area
 the banner lands in the top-left corner, under the cluster's gauge mask.
 
+patchd plans the high panel with **504x380 at (286, 0)** (`--safe
+504x380+286+0`, carplay_patch.js `defaultArgs`, with the cluster page
+below): the phone's own turn card sits small at the very top of the map.
+The patcher's own default, without `--safe`, stays:
+
 The default safe area is **504x432 at (286, 8)** (x 286–790, y 8–440):
 
 - x: BMW's own IC_MID safe area (504x456 at (708, 153) on the panel) lies
@@ -462,6 +467,14 @@ sites is on that build's `stock` list.
 When CarPlay starts the cluster stream, `requestStream` (Edit 3) sends the
 phone `ShowUI(url, uuid)` with the cluster display's URL,
 `maps:/car/instrumentcluster`. Edit 6 sends
+`maps:/car/instrumentcluster?showETA=yes` (or, with `--showui noeta`, what
+patchd plans on the high panel, `maps:/car/instrumentcluster?showETA=no`,
+one byte shorter, NUL padded: the page without the arrival-time bar). With
+`--start-page root` (patchd's on the high panel) the initial URL is the full
+cluster page, `maps:/car/instrumentcluster`, in place of the map alone, in
+the same 32 bytes of the map URL's log string, so the phone draws its own
+turn card; `--phys 200x88` (likewise) advertises Cast's 200x88 mm, so it is
+small. The URL with ETA is
 `maps:/car/instrumentcluster?showETA=yes`: the root path, so the phone keeps
 its full cluster page, and `showETA=yes`, which asks for the arrival-time
 card during a route: Google Maps draws an ETA line on the cluster map and

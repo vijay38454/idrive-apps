@@ -632,14 +632,22 @@ test('an earlier safe area (full frame, the old default, 0.10.6\'s) prompts CarP
     /* A daemon that omits safe (before the safe area) is taken as current. */
     patch._broadcast({ ev: 'status', state: 'patched', panel: 'high', mode: 'avb', res: '1088x480' });
     await until('older daemon', () => c.statusText() === 'Status: Patched' && c.mapText() === 'Cluster map: Waiting for the phone' && c.patchStatus.safe === undefined);
-    assert.strictEqual(SAFE, '504x432+286+8');
-    /* The default safe area before the turn card moved to the map's top: Update needed, and one
-     * Patch press writes SAFE. */
+    assert.strictEqual(SAFE, '504x380+286+0');
+    /* The default safe area before the turn card moved to the map's very top: Update needed,
+     * and one Patch press writes SAFE. */
+    patch.safe = '504x432+286+8';
+    patch.announce('patched', 'high', null);
+    await until('previous default safe area', () => c.statusText() === 'Status: Update needed');
+    c.enableMap();
+    await until('applied previous default', () => patch.count('apply') === 2 && !patch.busy);
+    assert.strictEqual(patch.safe, SAFE);
+    await until('current after previous default', () => c.statusText() === 'Status: Patched');
+    /* The one before that, with the turn card over the map's middle. */
     patch.safe = '504x368+286+72';
     patch.announce('patched', 'high', null);
     await until('old default safe area', () => c.statusText() === 'Status: Update needed');
     c.enableMap();
-    await until('applied old default', () => patch.count('apply') === 2 && !patch.busy);
+    await until('applied old default', () => patch.count('apply') === 3 && !patch.busy);
     assert.strictEqual(patch.safe, SAFE);
     await until('current after old default', () => c.statusText() === 'Status: Patched');
     /* The safe area 0.10.6 wrote: its Patch button is prompted, and writes SAFE. */
@@ -647,7 +655,7 @@ test('an earlier safe area (full frame, the old default, 0.10.6\'s) prompts CarP
     patch.announce('patched', 'high', null);
     await until('0.10.6 safe area', () => c.statusText() === 'Status: Update needed');
     c.enableMap();
-    await until('applied again', () => patch.count('apply') === 3 && !patch.busy);
+    await until('applied again', () => patch.count('apply') === 4 && !patch.busy);
     assert.strictEqual(patch.safe, SAFE);
     await until('current again', () => c.statusText() === 'Status: Patched');
     c.close();

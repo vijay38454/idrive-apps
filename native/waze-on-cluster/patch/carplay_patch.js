@@ -36,6 +36,12 @@
  *            (504x432 at 286,8). `--res WxH` picks another pixel size at the same
  *            physical size, `--safe` another safe area; `--res stock`, and
  *            `--panel mid`, keep the build's stock geometry.
+ *            `--phys WxH` advertises another physical size instead of 138x61
+ *            mm: 200x88, Cast's density at our 1088x480 (patchd's default on
+ *            the high panel, so the phone draws its cards small), 180x88,
+ *            the mm Cast declares for its 984x480 display, or one of the
+ *            steps between 138x61 and 180x88 (145x65, 150x68, 155x72,
+ *            160x75, 165x78, 170x82, 175x85).
  *
  *   mapurl   the cluster display's initial URL. CarPlay hands the phone an
  *            empty initial URL for the cluster display, so the phone streams
@@ -59,7 +65,14 @@
  *            URL for ShowUI, rewritten to load the URL. Applied in every
  *            mode on a build where it is found; a build where it is not, or
  *            one that adds carplay.conf's SHOW_UI_OPTIONS to the URL itself,
- *            gets the other edits without it.
+ *            gets the other edits without it. `--showui noeta` writes
+ *            `maps:/car/instrumentcluster?showETA=no` there instead, one
+ *            byte shorter, NULs after it: the cluster page without the
+ *            arrival-time card (patchd's default on the high panel).
+ *            `--start-page root` writes the full cluster page,
+ *            `maps:/car/instrumentcluster`, as the initial URL in place of
+ *            the map alone, in the same 32 bytes (patchd's default on the
+ *            high panel), so the phone draws its own turn card.
  *
  *            The two sites of the map URL or the ShowUI URL edit holding
  *            different forms, or one written and not the other, read as
@@ -82,7 +95,7 @@
  *
  *   carplay_patch.js status  [--target <file>] [--coding <shm>]
  *   carplay_patch.js probe   [<file>]
- *   carplay_patch.js plan    --panel high|mid [--sink <url> | --capture <fifo>] [--res WxH|stock] [--safe WxH+X+Y|full] --out <file> [--target <file>] [--coding <shm>] [--unproven]
+ *   carplay_patch.js plan    --panel high|mid [--sink <url> | --capture <fifo>] [--res WxH|stock] [--safe WxH+X+Y|full] [--showui eta|noeta] [--start-page map|root] [--phys WxH, a size of PHYS] --out <file> [--target <file>] [--coding <shm>] [--unproven]
  *   carplay_patch.js overlay --plan <file> [--target <file>]
  *   carplay_patch.js revert  [--target <file>] [--yes] [--drop-backup]
  *   carplay_patch.js verify  [--target <file>]
@@ -104,8 +117,10 @@ var fileMode = require('./file_mode.js');
 function latin1(s) { return Buffer.from(s, 'latin1').toString('hex'); }
 
 var MAP_URL = locator.MAP_URL;
+var ROOT_URL = locator.ROOT_URL;
 var ETA_URL = locator.MAP_URL_FORMS.filter(function (f) { return f.name === 'eta'; })[0].url;
 var SHOWUI_URL = locator.SHOWUI_URL;
+var SHOWUI_NOETA_URL = locator.SHOWUI_NOETA_URL;
 
 /* The shipped bytes of builds an earlier release of this tool patched in
  * the file, by GNU build-id, kept only to put such a patch back when its
@@ -145,6 +160,21 @@ var SHIPPED = {
  * pixel. Every geometry this tool writes has this physical size, which tells
  * it from a build's stock geometry. */
 var RES_DEFAULT = { w: 1088, h: 480, mmw: 138, mmh: 61 };
+/* The physical sizes `--phys` advertises instead: Cast's, as hook111
+ * declares them: 200x88 mm per 1088x480 px, scaled to its 984x480 display by
+ * integer division (180x88), or kept at our 1088x480 (200x88, its density);
+ * and seven steps between 138x61 and 180x88 (smaller mm, bigger text). Only
+ * these read as this tool's besides RES_DEFAULT's, so a stock geometry is
+ * still told from ours. */
+var PHYS = {
+    '145x65': { mmw: 145, mmh: 65 }, '150x68': { mmw: 150, mmh: 68 }, '155x72': { mmw: 155, mmh: 72 },
+    '160x75': { mmw: 160, mmh: 75 }, '165x78': { mmw: 165, mmh: 78 }, '170x82': { mmw: 170, mmh: 82 },
+    '175x85': { mmw: 175, mmh: 85 }, '180x88': { mmw: 180, mmh: 88 }, '200x88': { mmw: 200, mmh: 88 }
+};
+function physOurs(g) {
+    return (g.mmw === RES_DEFAULT.mmw && g.mmh === RES_DEFAULT.mmh) ||
+        Object.keys(PHYS).some(function (k) { return PHYS[k].mmw === g.mmw && PHYS[k].mmh === g.mmh; });
+}
 /* The default safe area in the 1088x480 frame (PATCH.md "Safe area"): x
  * from BMW's own IC_MID safe area (which lies inside the map area), the top
  * 8 rows below the map's top edge, so Apple's turn card sits at the top of
@@ -212,34 +242,42 @@ function sinkState(buf, s) {
     return url === locator.SINK_STOCK ? { state: 'original' } : { state: 'redirected', url: url };
 }
 
-/* 'original', 'patched' (MAP_URL) or 'eta' (ETA_URL) when both sites read
- * stock or both hold that form; 'unknown' when they differ (a write of ours
- * cut short), which only the whole backup restores; 'absent' with why when
- * the locator does not find it: the edit is then left alone. sites: [offset,
- * hex MAP_URL's form writes] of each. */
+/* 'original', 'patched' (MAP_URL, or ROOT_URL with page 'root') or 'eta'
+ * (ETA_URL) when both sites read stock or both hold that form; 'unknown'
+ * when they differ (a write of ours cut short), which only the whole backup
+ * restores; 'absent' with why when the locator does not find it: the edit
+ * is then left alone. sites: [offset, hex MAP_URL's form writes] of each;
+ * rootSites, those of the root start page (`--start-page root`), which a
+ * patch status counts as patched: patchd and the app see the start page as
+ * they see MAP_URL. */
 function mapUrlState(m) {
     if (!m.ok) return { state: 'absent', reason: m.reason };
-    var sites = [[m.slot, m.slotBytes], [m.lea, m.leaBytes]];
-    if (m.slotIs !== m.leaIs) return { state: 'unknown', reason: 'map URL: partly patched', sites: sites };
-    return { state: m.slotIs === 'stock' ? 'original' : m.slotIs === 'current' ? 'patched' : 'eta', sites: sites };
+    var sites = [[m.slot, m.slotBytes], [m.lea, m.leaBytes]], root = m.forms.filter(function (f) { return f.name === 'root'; })[0];
+    var rootSites = [[m.slot, root.slotBytes], [m.lea, root.leaBytes]];
+    if (m.slotIs !== m.leaIs) return { state: 'unknown', reason: 'map URL: partly patched', sites: sites, rootSites: rootSites };
+    return { state: m.slotIs === 'stock' ? 'original' : m.slotIs === 'eta' ? 'eta' : 'patched', page: m.slotIs === 'root' ? 'root' : m.slotIs === 'current' ? 'map' : undefined,
+        sites: sites, rootSites: rootSites };
 }
 function mapUrlOurs(s) { return s.state === 'patched' || s.state === 'eta'; }
 
-/* 'original' or 'patched' (SHOWUI_URL) when both sites read stock or both
- * patched; 'unknown' when they differ or one holds a mix of the two (a write
- * of ours cut short), which only the whole backup restores; 'absent' with
- * why when the locator does not find it (na: the build adds carplay.conf's
- * options itself): the edit is then left alone. sites: [offset, hex the
- * edit writes] of each. */
+/* 'original', 'patched' (SHOWUI_URL) or 'noeta' (SHOWUI_NOETA_URL) when
+ * both sites read stock or both hold that form; 'unknown' when they differ
+ * or one holds a mix of stock and patched bytes (a write of ours cut short),
+ * which only the whole backup restores; 'absent' with why when the locator
+ * does not find it (na: the build adds carplay.conf's options itself): the
+ * edit is then left alone. sites: [offset, hex the edit writes] of each, and
+ * noetaSites those of the form without ETA. */
 function showUiState(m) {
     if (!m.ok) return { state: 'absent', reason: m.reason, na: !!m.na };
-    var sites = [[m.str, m.strBytes], [m.call, m.callBytes]];
-    if (m.strIs !== m.callIs || m.strIs === 'mixed') return { state: 'unknown', reason: 'ShowUI URL: partly patched', sites: sites };
-    return { state: m.strIs === 'stock' ? 'original' : 'patched', sites: sites };
+    var sites = [[m.str, m.strBytes], [m.call, m.callBytes]], noetaSites = [[m.str, m.strNoetaBytes], [m.call, m.callBytes]];
+    if ((m.strIs === 'noeta' ? 'patched' : m.strIs) !== m.callIs || m.strIs === 'mixed')
+        return { state: 'unknown', reason: 'ShowUI URL: partly patched', sites: sites, noetaSites: noetaSites };
+    return { state: m.strIs === 'stock' ? 'original' : m.strIs, sites: sites, noetaSites: noetaSites };
 }
+function showUiOurs(s) { return s.state === 'patched' || s.state === 'noeta'; }
 
 /* The URL edits' states (`c` classified): ours when any holds our bytes. */
-function urlsOurs(c) { return mapUrlOurs(c.mapurl) || c.showui.state === 'patched'; }
+function urlsOurs(c) { return mapUrlOurs(c.mapurl) || showUiOurs(c.showui); }
 
 function selfstartState(buf, s) {
     if (!s.ok) return { state: 'unknown', reason: s.reason };
@@ -257,14 +295,14 @@ function readRes(buf, r) {
     };
 }
 
-/* This tool's geometry has its physical size, the view area at (0,0) and a
- * safe area inside the frame; a stock one has another physical size and a
- * safe area inside the frame. */
+/* This tool's geometry has its physical size (or one of PHYS), the view
+ * area at (0,0) and a safe area inside the frame; a stock one has another
+ * physical size and a safe area inside the frame. */
 function resState(buf, r) {
     if (!r.ok) return { state: 'unknown', reason: r.reason };
     var g = readRes(buf, r);
     var inside = g.w > 0 && g.h > 0 && g.safew > 0 && g.safeh > 0 && g.safex + g.safew <= g.w && g.safey + g.safeh <= g.h;
-    var ours = g.mmw === RES_DEFAULT.mmw && g.mmh === RES_DEFAULT.mmh;
+    var ours = physOurs(g);
     if (inside && !ours && g.mmw > 0 && g.mmh > 0) return { state: 'original', res: g };
     if (inside && ours && g.viewx === 0 && g.viewy === 0) return { state: 'patched', res: g };
     return { state: 'unknown', reason: 'resolution: geometry not recognised', res: g };
@@ -304,7 +342,7 @@ function notPristine(c) {
     var bad = unrecognised(c);
     if (bad.length) return brief(bad);
     var edited = EDITS.filter(function (e) { return c[e].state !== 'original'; }).concat(mapUrlOurs(c.mapurl) ? ['mapurl'] : [],
-        c.showui.state === 'patched' ? ['showui'] : []);
+        showUiOurs(c.showui) ? ['showui'] : []);
     return edited.length ? edited.join(', ') + ' edited' : null;
 }
 
@@ -354,9 +392,11 @@ function describe(name, s) {
     if (name === 'mapurl') return s.state === 'absent' ? 'NOT APPLIED (' + s.reason + ')'
         : s.state === 'original' ? 'ORIGINAL (the phone streams the cluster map once a route starts)'
         : s.state === 'eta' ? 'PATCHED WITH ETA (the phone streams the cluster map from connect: ' + ETA_URL + '; the patch writes ' + MAP_URL + ')'
+        : s.page === 'root' ? 'PATCHED, FULL PAGE (the phone starts on its full cluster page from connect: ' + ROOT_URL + ')'
         : 'PATCHED (the phone streams the cluster map from connect: ' + MAP_URL + ')';
     if (name === 'showui') return s.state === 'absent' ? 'NOT APPLIED (' + s.reason + ')'
         : s.state === 'original' ? 'ORIGINAL (ShowUI asks the phone for ' + locator.ALT_URL + ')'
+        : s.state === 'noeta' ? 'PATCHED (ShowUI URL without ETA: ShowUI asks the phone for ' + SHOWUI_NOETA_URL + ', without the arrival-time card)'
         : 'PATCHED (ShowUI asks the phone for ' + SHOWUI_URL + ', with the arrival-time card)';
     if (name === 'selfstart') return s.state === 'original' ? 'ORIGINAL (waits for NavController; stream never starts)' : 'SELF-START (CarPlay starts the cluster stream itself)';
     return s.state === 'original' ? 'ORIGINAL (IC_HIGH advertises ' + s.res.w + 'x' + s.res.h + ')' : 'PATCHED (IC_HIGH advertises ' + geomText(s.res) + ')';
@@ -445,10 +485,12 @@ function sinkUrlFor(capture, sink) {
  * geometry (--res stock and the mid panel; the mid builder is never
  * rewritten). The high panel advertises this tool's display size: --res WxH,
  * or the default, at the map area's physical size, with the default safe
- * area scaled to that size, --safe WxH+X+Y, or --safe full (the whole frame). */
-function resFor(panel, res, safe) {
+ * area scaled to that size, --safe WxH+X+Y, or --safe full (the whole frame);
+ * phys, a key of PHYS (--phys), another physical size. */
+function resFor(panel, res, safe, phys) {
     if (res !== undefined && panel !== 'high') die('--res rewrites the IC_HIGH geometry; it goes with --panel high');
     if (safe !== undefined && (panel !== 'high' || res === 'stock')) die('--safe sets the safe area of the advertised size; it goes with --panel high, not --res stock');
+    if (phys !== undefined && (panel !== 'high' || res === 'stock')) die('--phys sets the physical size of the advertised size; it goes with --panel high, not --res stock');
     if (panel !== 'high' || res === 'stock') return null;
     var w = RES_DEFAULT.w, h = RES_DEFAULT.h;
     if (res !== undefined) {
@@ -462,7 +504,8 @@ function resFor(panel, res, safe) {
     var d = SAFE_DEFAULT, dw = RES_DEFAULT.w, dh = RES_DEFAULT.h;
     var x0 = Math.round(d.x * w / dw), x1 = Math.round((d.x + d.w) * w / dw);
     var y0 = Math.round(d.y * h / dh), y1 = Math.round((d.y + d.h) * h / dh);
-    var g = { w: w, h: h, mmw: RES_DEFAULT.mmw, mmh: RES_DEFAULT.mmh, safew: x1 - x0, safeh: y1 - y0, safex: x0, safey: y0 };
+    var mm = phys !== undefined ? PHYS[phys] : RES_DEFAULT;
+    var g = { w: w, h: h, mmw: mm.mmw, mmh: mm.mmh, safew: x1 - x0, safeh: y1 - y0, safex: x0, safey: y0 };
     if (safe === 'full') {
         g.safew = w; g.safeh = h; g.safex = 0; g.safey = 0;
     } else if (safe !== undefined) {
@@ -535,9 +578,9 @@ function urlsLeft(cur, bc) {
     if (m && m.ok) out = [[m.slot, 'slotBytes'], [m.lea, 'leaBytes']].filter(function (s) {
         return m.forms.some(function (f) { return cur.toString('hex', s[0], s[0] + f[s[1]].length / 2) === f[s[1]]; });
     }).map(function (s) { return [s[0], m[s[1]].length / 2]; });
-    if (u && u.ok) out = out.concat([[u.str, u.strBytes], [u.call, u.callBytes]].filter(function (s) {
-        return cur.toString('hex', s[0], s[0] + s[1].length / 2) === s[1];
-    }).map(function (s) { return [s[0], s[1].length / 2]; }));
+    if (u && u.ok) out = out.concat([[u.str, [u.strBytes, u.strNoetaBytes]], [u.call, [u.callBytes]]].filter(function (s) {
+        return s[1].some(function (b) { return cur.toString('hex', s[0], s[0] + b.length / 2) === b; });
+    }).map(function (s) { return [s[0], s[1][0].length / 2]; }));
     return out;
 }
 
@@ -569,12 +612,15 @@ function restorePlan(target, cur, c) {
 
 /* The edited image of `buf` (classified as `c`; `orig`, the pristine
  * original of its build, whose stock geometry `--res stock` and the mid
- * panel write back): { out, changed (what each changed region is for),
- * writes ({ mapurl, showui, res }: what the edit leaves written), wrong (why
- * the edited image does not read as exactly the requested state, at the
- * same sites, changed only in the edit regions; null when it does) }. The
- * in-memory plan (plan) comes from here. */
-function edited(buf, c, orig, panel, sinkUrl, wantRes) {
+ * panel write back; showui, the ShowUI URL's form: 'eta', the default, or
+ * 'noeta' (as 'eta' but without the arrival-time card); start, the initial
+ * URL's page: 'map', the default, or 'root', the full cluster page): { out,
+ * changed (what each changed region is for), writes ({ mapurl, showui, res,
+ * start }: what the edit leaves written, showui the form or false, start
+ * 'root' or absent), wrong (why the edited image does not read as exactly
+ * the requested state, at the same sites, changed only in the edit regions;
+ * null when it does) }. The in-memory plan (plan) comes from here. */
+function edited(buf, c, orig, panel, sinkUrl, wantRes, showui, start) {
     var slotLen = locator.SINK_STOCK.length;
     var loc = c.loc, out = Buffer.from(buf), changed = [];
     function put(what, off, bytes) {
@@ -610,9 +656,16 @@ function edited(buf, c, orig, panel, sinkUrl, wantRes) {
     });
 
     /* The URL edits, in every mode, where the build has them. */
-    var writes = { mapurl: c.mapurl.state !== 'absent', showui: c.showui.state !== 'absent', res: wantRes };
-    if (writes.mapurl) c.mapurl.sites.forEach(function (s) { put('map URL -> ' + MAP_URL, s[0], Buffer.from(s[1], 'hex')); });
-    if (writes.showui) c.showui.sites.forEach(function (s) { put('ShowUI URL -> ' + SHOWUI_URL, s[0], Buffer.from(s[1], 'hex')); });
+    var noeta = showui === 'noeta', form = noeta ? 'noeta' : 'eta';
+    var root = start === 'root' && c.mapurl.state !== 'absent';
+    var writes = { mapurl: c.mapurl.state !== 'absent', showui: c.showui.state !== 'absent' && form, res: wantRes };
+    if (root) writes.start = 'root';
+    if (writes.mapurl) (root ? c.mapurl.rootSites : c.mapurl.sites).forEach(function (s) {
+        put('map URL -> ' + (root ? ROOT_URL : MAP_URL), s[0], Buffer.from(s[1], 'hex'));
+    });
+    if (writes.showui) (noeta ? c.showui.noetaSites : c.showui.sites).forEach(function (s) {
+        put('ShowUI URL -> ' + (noeta ? SHOWUI_NOETA_URL : SHOWUI_URL), s[0], Buffer.from(s[1], 'hex'));
+    });
 
 
     /* The edited image must read as exactly the requested state, at the same
@@ -622,8 +675,8 @@ function edited(buf, c, orig, panel, sinkUrl, wantRes) {
         : cc.sink.state !== (sinkUrl !== undefined ? 'redirected' : 'original') ? 'sink'
         : cc.selfstart.state !== 'patched' ? 'self-start'
         : cc.res.state !== (wantRes ? 'patched' : 'original') ? 'resolution'
-        : cc.mapurl.state !== (writes.mapurl ? 'patched' : 'absent') ? 'map URL'
-        : cc.showui.state !== (writes.showui ? 'patched' : 'absent') ? 'ShowUI URL'
+        : cc.mapurl.state !== (writes.mapurl ? 'patched' : 'absent') || (writes.mapurl && cc.mapurl.page !== (root ? 'root' : 'map')) ? 'map URL'
+        : cc.showui.state !== (writes.showui ? (form === 'eta' ? 'patched' : form) : 'absent') ? 'ShowUI URL'
         : !onlyRegionsDiffer(buf, out, regions(c)) ? 'bytes outside the edit regions' : null;
     return { out: out, changed: changed, writes: writes, wrong: wrong };
 }
@@ -700,8 +753,8 @@ function cmdVerify(target) {
         ', sink ' + (c.sink.state === 'original' ? 'original (AVB 15)' : c.sink.url) +
         ', self-start ' + (c.selfstart.state === 'patched' ? 'on' : 'off') +
         ', res ' + (c.res.state === 'patched' ? c.res.res.w + 'x' + c.res.res.h : 'stock') +
-        ', map URL ' + (c.mapurl.state === 'patched' ? 'on' : c.mapurl.state === 'eta' ? 'on with ETA' : c.mapurl.state === 'original' ? 'off' : 'n/a') +
-        ', ShowUI URL ' + (c.showui.state === 'patched' ? 'with ETA' : c.showui.state === 'original' ? 'stock' : 'n/a') + '\n');
+        ', map URL ' + (c.mapurl.state === 'patched' ? (c.mapurl.page === 'root' ? 'on, full page' : 'on') : c.mapurl.state === 'eta' ? 'on with ETA' : c.mapurl.state === 'original' ? 'off' : 'n/a') +
+        ', ShowUI URL ' + (c.showui.state === 'patched' ? 'with ETA' : c.showui.state === 'noeta' ? 'without ETA' : c.showui.state === 'original' ? 'stock' : 'n/a') + '\n');
 }
 
 function fsyncFile(path) {
@@ -840,25 +893,33 @@ function overlay(buf, text) {
  * (aapd_patch.js codingRefusal: KI_KOMBI_VARIANT 7, or one that cannot be
  * read, planned as 7), the locator: every edit site found and
  * verified, on any build. --unproven, which earlier releases' records
- * pass, changes nothing. Writes the plan to `outFile` by rename and prints
- * one JSON line: build, version, sha256, size, edits, coding ('ok',
- * 'unreadable'), variant (the coding read, null when unreadable), writes,
- * planSha256. */
-function cmdPlan(target, panel, capture, sink, res, safe, codingFile, outFile) {
+ * pass, changes nothing. --showui eta, the default, plans the URL with the
+ * arrival-time card; noeta the URL without it. --start-page root gives the
+ * cluster display the full cluster page as its initial URL in place of the
+ * map alone. --phys WxH, a size of PHYS, advertises that physical size in
+ * place of 138x61 mm. Without them the plan is the one before the options;
+ * patchd plans the high panel with them (defaultArgs). Writes the plan to
+ * `outFile` by rename and prints one JSON line: build, version, sha256,
+ * size, edits, coding ('ok', 'unreadable'), variant (the coding read, null
+ * when unreadable), writes, planSha256. */
+function cmdPlan(target, panel, capture, sink, res, safe, showui, start, phys, codingFile, outFile) {
     var hu = headUnit.refused();
     if (hu) die('refusing: ' + hu);
     if (!outFile) die('plan needs --out <file>');
     if (panel !== 'high' && panel !== 'mid') die('--panel must be high or mid');
+    if (showui !== undefined && showui !== 'eta' && showui !== 'noeta') die('--showui must be eta or noeta');
+    if (start !== undefined && start !== 'map' && start !== 'root') die('--start-page must be map or root');
+    if (phys !== undefined && !Object.prototype.hasOwnProperty.call(PHYS, phys)) die('--phys must be ' + Object.keys(PHYS).slice(0, -1).join(', ') + ' or ' + Object.keys(PHYS).slice(-1)[0]);
     var coding = readCoding(codingFile), codingBad = codingRefusal(coding);
     if (codingBad) die('refusing: ' + codingBad);
-    var wantRes = resFor(panel, res, safe);
+    var wantRes = resFor(panel, res, safe, phys);
     var sinkUrl = sinkUrlFor(capture, sink);
     if (sinkUrl !== undefined && Buffer.byteLength(sinkUrl, 'latin1') > locator.SINK_STOCK.length) die('sink URL too long');
     var buf = readTarget(target), c = classify(buf), bad = unrecognised(c);
     if (bad.length) die('refusing: ' + bad.join('; '));
     var why = notPristine(c);
     if (why) die('in memory needs the pristine build on disk: ' + why);
-    var e = edited(buf, c, buf, panel, sinkUrl, wantRes);
+    var e = edited(buf, c, buf, panel, sinkUrl, wantRes, showui, start);
     if (e.wrong) die('refusing: the edited image does not verify (' + e.wrong + ')');
     var p = planText(buf, e.out, c);
     if (p.err) die('refusing: ' + p.err);
@@ -869,7 +930,7 @@ function cmdPlan(target, panel, capture, sink, res, safe, codingFile, outFile) {
     fsyncFile(tmp);
     fs.renameSync(tmp, outFile);
     process.stdout.write(JSON.stringify({ build: c.loc.buildId, version: c.loc.version ? 'carplay ' + c.loc.version : label(c), sha256: sha256(buf), size: buf.length, edits: p.edits,
-        coding: coding.err ? 'unreadable' : 'ok', variant: coding.err ? null : coding.variant, writes: { mapurl: e.writes.mapurl, showui: e.writes.showui, res: e.writes.res ? resKey(e.writes.res) : null },
+        coding: coding.err ? 'unreadable' : 'ok', variant: coding.err ? null : coding.variant, writes: Object.assign({ mapurl: e.writes.mapurl, showui: e.writes.showui, res: e.writes.res ? resKey(e.writes.res) : null }, e.writes.start ? { start: e.writes.start } : {}),
         planSha256: sha256(Buffer.from(p.text)) }) + '\n');
 }
 
@@ -928,6 +989,12 @@ function parseArgs(argv) {
             a.res = (i + 1 < argv.length && argv[i + 1].indexOf('--') !== 0) ? argv[++i] : null;
         } else if (t === '--safe') {
             a.safe = (i + 1 < argv.length && argv[i + 1].indexOf('--') !== 0) ? argv[++i] : null;
+        } else if (t === '--showui') {
+            a.showui = (i + 1 < argv.length && argv[i + 1].indexOf('--') !== 0) ? argv[++i] : null;
+        } else if (t === '--start-page') {
+            a.start = (i + 1 < argv.length && argv[i + 1].indexOf('--') !== 0) ? argv[++i] : null;
+        } else if (t === '--phys') {
+            a.phys = (i + 1 < argv.length && argv[i + 1].indexOf('--') !== 0) ? argv[++i] : null;
         } else a._.push(t);
     }
     return a;
@@ -942,9 +1009,9 @@ function main() {
     else if (cmd === 'probe') cmdProbe(a.target || a._[1] || '/usr/bin/carplay');
     else if (cmd === 'revert') cmdRevert(target, a.yes, a.force, a.dropBackup);
     else if (cmd === 'verify') cmdVerify(target);
-    else if (cmd === 'plan') cmdPlan(target, a.panel, a.capture, a.sink, a.res, a.safe, coding, a.out);
+    else if (cmd === 'plan') cmdPlan(target, a.panel, a.capture, a.sink, a.res, a.safe, a.showui, a.start, a.phys, coding, a.out);
     else if (cmd === 'overlay') { cmdOverlay(target, a.plan); line('end', 'complete'); }
-    else { process.stderr.write('usage: carplay_patch.js status|probe|revert|verify|plan|overlay [--target <file>] [--coding <shm>] [--panel high|mid] [--capture <fifo> | --sink <url>] [--res WxH|stock] [--safe WxH+X+Y|full] [--unproven] [--yes] [--force] [--drop-backup]\n'); process.exit(2); }
+    else { process.stderr.write('usage: carplay_patch.js status|probe|revert|verify|plan|overlay [--target <file>] [--coding <shm>] [--panel high|mid] [--capture <fifo> | --sink <url>] [--res WxH|stock] [--safe WxH+X+Y|full] [--showui eta|noeta] [--start-page map|root] [--phys WxH, a size of PHYS] [--unproven] [--yes] [--force] [--drop-backup]\n'); process.exit(2); }
 }
 
 /* Whether target holds a change besides our edits, against its original
@@ -958,9 +1025,34 @@ function foreignIn(target) {
     } catch (e) { return null; }
 }
 
+/* The cluster setup patchd plans on the high panel (PATCH.md "The default
+ * plan"): the full cluster page as the start page, so the phone draws its
+ * own turn card; Cast's 200x88 mm, so the card is small; the ShowUI URL
+ * without the arrival-time card; and the safe area at the very top of the
+ * map, 504x380 at 286,0. */
+var HIGH_DEFAULTS = [['--start-page', 'root'], ['--phys', '200x88'], ['--showui', 'noeta'], ['--safe', '504x380+286+0']];
+
+/* The plan's arguments `args` with HIGH_DEFAULTS added on the high panel
+ * where they do not name that option themselves, so an option given still
+ * wins. The size and safe area go with this tool's geometry: --res stock
+ * takes neither, another --res no default safe area (it is in 1088x480's
+ * pixels). The mid panel's arguments are kept as they are. */
+function defaultArgs(args) {
+    var out = (args || []).slice(), p = out.indexOf('--panel'), r = out.indexOf('--res');
+    if (p < 0 || out[p + 1] !== 'high') return out;
+    HIGH_DEFAULTS.forEach(function (d) {
+        if (out.indexOf(d[0]) >= 0) return;
+        if (d[0] === '--phys' && r >= 0 && out[r + 1] === 'stock') return;
+        if (d[0] === '--safe' && r >= 0) return;
+        out.push(d[0], d[1]);
+    });
+    return out;
+}
+
 /* edited, classify, resFor and sinkUrlFor: the image an earlier release's
  * apply wrote, for the tests' fixtures. */
 module.exports = { trustedBackup: trustedBackup, SHIPPED: SHIPPED, parsePlan: parsePlan, overlay: overlay, againstPlan: againstPlan, planOf: planOf,
-    foreignIn: foreignIn, edited: edited, classify: classify, resFor: resFor, sinkUrlFor: sinkUrlFor };
+    foreignIn: foreignIn, edited: edited, classify: classify, resFor: resFor, sinkUrlFor: sinkUrlFor,
+    HIGH_DEFAULTS: HIGH_DEFAULTS, defaultArgs: defaultArgs };
 
 if (require.main === module) main();

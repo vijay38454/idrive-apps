@@ -360,7 +360,7 @@ async function main() {
     r = await status();
     ok('status: carplay\'s memory holds the plan: patched, res 1088x480', r.state === 'patched' && r.mode === 'udp' && r.res === '1088x480' && !r.reason && !r.pending &&
         !r.carplay, JSON.stringify(r));
-    ok('status: the plan\'s default safe area', r.safe === '504x432+286+8', JSON.stringify(r));
+    ok('status: the plan\'s default safe area, the high panel\'s cluster setup', r.safe === '504x380+286+0', JSON.stringify(r));
 
     /* No main PID: an apply that needs a restart is an error, and carplay is
      * neither started nor restarted; its next start is armed. */
@@ -429,6 +429,9 @@ async function main() {
     rc = inmemRecord();
     ok('list written after boot: apply defers activation', r.carplay === 'deferred' && calls.length === 0 && dummy.exitCode === null, JSON.stringify([r, calls]));
     ok('list written after boot: the stock AVB sink\'s plan armed', !!rc && rc.args.indexOf('--sink') < 0 && rc.args.indexOf('--capture') < 0 && armed(), JSON.stringify(rc));
+    /* The Patch button with no options typed plans the high panel's cluster setup. */
+    ok('the Patch button\'s plan: exactly the high panel\'s cluster setup', !!rc && JSON.stringify(rc.args) === JSON.stringify(['--panel', 'high', '--coding', car.CODING,
+        '--start-page', 'root', '--phys', '200x88', '--showui', 'noeta', '--safe', '504x380+286+0']), JSON.stringify(rc));
 
     /* Loaded again (a later boot in effect): the next change restarts carplay
      * and clears the pending start. */

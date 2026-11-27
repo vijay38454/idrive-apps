@@ -225,15 +225,21 @@ function fresh(buf) {
 /* The patch an earlier release's install wrote to the file (IC_HIGH, the
  * stock AVB sink), with our backup and its record. */
 function earlierPatch() { patcher(['apply', '--target', TGT, '--panel', 'high', '--coding', headUnit.CODING, '--yes']); }
-/* The safe height and x,y of this version's default safe area (504x432 at
- * 286,8); earlier releases wrote 504x368 at 286,72. */
-var SAFE2_NEW = Buffer.from('b00100001e010800', 'hex');
-/* An earlier release's patch with this version's default safe area: the
- * bytes this version's plan holds, its record kept. */
+/* The bytes this version's plan holds: SRCBUF with the plan patchd makes on
+ * the high panel (carplay_patch.js defaultArgs: its start page, size, ShowUI
+ * URL and safe area) laid over it. */
+function thisVersionImage() {
+    var cpp = require('../carplay_patch.js'), t = path.join(dir, 'this-version'), o = t + '.plan';
+    fs.writeFileSync(t, SRCBUF, { mode: 0o755 });
+    patcher(['plan', '--target', t].concat(cpp.defaultArgs(['--panel', 'high', '--coding', headUnit.CODING]), ['--out', o]));
+    return cpp.overlay(SRCBUF, fs.readFileSync(o, 'utf8')).buf;
+}
+/* An earlier release's patch holding the bytes this version's plan holds,
+ * its record kept. */
 function earlierPatchAsThis() {
     earlierPatch();
-    var record = require('../patch_record.js'), rc = JSON.parse(fs.readFileSync(record.recordPath(TGT), 'utf8')), b = fs.readFileSync(TGT);
-    SAFE2_NEW.copy(b, 0x20ca74); fs.writeFileSync(TGT, b);
+    var record = require('../patch_record.js'), rc = JSON.parse(fs.readFileSync(record.recordPath(TGT), 'utf8'));
+    fs.writeFileSync(TGT, thisVersionImage());
     record.write(TGT, { patched: rc.patched, proven: rc.proven });
 }
 
@@ -882,8 +888,8 @@ async function main() {
     r = hook('activate');
     ok('coding 7: an install keeps a proven plan proven', r.code === 0 && !r.result.reboot &&
         JSON.stringify(trial()) === JSON.stringify({ enabled: true, proven: true, trial: false }), JSON.stringify([r.result, trial()]));
-    /* This version's patch: the earlier release's with this version's safe area. */
-    var current = Buffer.from(full); SAFE2_NEW.copy(current, 0x20ca74);
+    /* This version's patch: the bytes this version's plan holds. */
+    var current = thisVersionImage();
     /* An earlier release's patch recorded proven, its file as given. */
     function earlierRelease(buf) {
         fresh(SRCBUF);
@@ -1017,7 +1023,8 @@ async function main() {
     ok('a patch in carplay\'s file at the boot step: put back as it ships before carplay starts, planned there and that start armed',
         bootStep.status === 0 && /in-memory patch planned/.test(bootStep.stdout) && /carplay boot check: armed/.test(bootStep.stdout) && disk() === sha(SRCBUF) &&
         armed() && !!toPlan && toPlan.enabled === true && !toPlan.needsPlan && !!inmem.current('carplay') &&
-        JSON.stringify(toPlan.args) === JSON.stringify(['--panel', 'high', '--coding', headUnit.CODING]) && ro(),
+        JSON.stringify(toPlan.args) === JSON.stringify(['--panel', 'high', '--coding', headUnit.CODING,
+            '--start-page', 'root', '--phys', '200x88', '--showui', 'noeta', '--safe', '504x380+286+0']) && ro(),
         JSON.stringify([bootStep.stdout.slice(-600), toPlan]));
     runs(TGT);
     var watcher2 = cp.spawn(process.execPath, [path.join(__dirname, '..', 'recovery.js')], { env: Object.assign({}, ENV, { WOC_RECOVERY_TICK_MS: '100' }), stdio: 'ignore' });

@@ -1320,8 +1320,10 @@ test('a patch of ours found in carplay\'s file is put back at the boot step at o
         assert(!fs.existsSync(w.T.carplay.target + '.woc-orig') && !fs.existsSync(w.T.carplay.target + '.woc-orig.json') &&
             !fs.existsSync(record.recordPath(w.T.carplay.target)), what + ': no backup or record of ours left beside it');
         const m = inmem.readRecord('carplay');
-        assert.deepStrictEqual([m.enabled, m.needsPlan, m.args], [true, true, ['--panel', 'high', '--coding', CODING]],
-            what + ': a plan to make, for the watcher');
+        /* planned as patchd plans the high panel: the cluster setup with it */
+        assert.deepStrictEqual([m.enabled, m.needsPlan, m.args], [true, true, ['--panel', 'high', '--coding', CODING,
+            '--start-page', 'root', '--phys', '200x88', '--showui', 'noeta', '--safe', '504x380+286+0']],
+            what + ': a plan to make, for the watcher, with the high panel\'s cluster setup');
         assert(ro(), what + ': / read-only again');
     }
 });

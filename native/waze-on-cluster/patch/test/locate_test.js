@@ -14,7 +14,11 @@
  * reverted; the ShowUI URL sites found by structure, stock, patched, one
  * written, cut short inside either site, each of their checks broken with
  * the other edits patched, a build that adds carplay.conf's options itself
- * left alone; carplay 22.28.3's stock bytes of both edits
+ * left alone; the ShowUI URL's form without ETA (--showui noeta) written
+ * at the sites the URL with ETA is, one byte shorter and NUL padded, with
+ * and without the root start page (--start-page root), read back as ours;
+ * --phys's sizes; the high panel's default arguments (defaultArgs), planned
+ * as patchd plans them; carplay 22.28.3's stock bytes of both edits
  * checked against the code they encode. With CARPLAY_BIN, the reference
  * build's sites are the documented offsets; with CARPLAY_BINS (paths
  * separated by `:`), every other build is located or refused as recorded
@@ -76,11 +80,11 @@ function showSites(loc) { var m = loc.showui; return m.ok ? { showStr: m.str, sh
 function showExpected(at) { return { showStr: at.showStr, showCall: at.showCall, altGetter: at.altGetter }; }
 function showIs(m) { return m.strIs + '/' + m.callIs; }
 /* The fixture's ShowUI URL edit written ('str', 'call' or both) with the
- * bytes the locator reports; cut: the call site with only its first `cut`
- * bytes written. */
-function writeShowUi(b, at, which, cut) {
+ * bytes the locator reports, the log text without ETA with form 'noeta';
+ * cut: the call site with only its first `cut` bytes written. */
+function writeShowUi(b, at, which, cut, form) {
     var m = locator.locate(b).showui, call = Buffer.from(m.callBytes, 'hex');
-    if (which !== 'call') Buffer.from(m.strBytes, 'hex').copy(b, at.showStr);
+    if (which !== 'call') Buffer.from(form === 'noeta' ? m.strNoetaBytes : m.strBytes, 'hex').copy(b, at.showStr);
     if (which !== 'str') call.slice(0, cut === undefined ? call.length : cut).copy(b, at.showCall);
 }
 function reasons(loc) { return ['variant', 'sink', 'selfstart', 'res'].filter(function (e) { return !loc[e].ok; }).map(function (e) { return loc[e].reason; }); }
@@ -136,6 +140,23 @@ ok('the shifted build moves every site', ['slot', 'sink', 'call', 'mm'].every(fu
         ok('only the ShowUI ' + (w === 'str' ? 'log text' : 'call site') + ' patched: found, one site patched', m.ok &&
             showIs(m) === (w === 'str' ? 'patched/stock' : 'stock/patched'), json(m));
     });
+    /* The form without ETA (--showui noeta): the URL one byte shorter than
+     * the URL with ETA, at its place, NULs to the same end, so nothing after
+     * it moves; the call site the same. */
+    var nf = Buffer.from(s.buf);
+    writeShowUi(nf, s.at, null, undefined, 'noeta');
+    var nfl = locator.locate(nf);
+    ok('the ShowUI URL\'s form without ETA: the same sites, the log text noeta, the call site patched, the URL one byte shorter, NUL padded',
+        json(showSites(nfl)) === json(showExpected(s.at)) && showIs(nfl.showui) === 'noeta/patched' &&
+        locator.SHOWUI_NOETA_URL === 'maps:/car/instrumentcluster?showETA=no' && locator.SHOWUI_NOETA_URL.length === locator.SHOWUI_URL.length - 1 &&
+        nfl.showui.strNoetaBytes.length === nfl.showui.strBytes.length && nfl.showui.url === s.at.showStr + 24 &&
+        nf.toString('latin1', s.at.showStr, s.at.showStr + 64) === 'mCinemoCarPlay->ShowUI(\0' + locator.SHOWUI_NOETA_URL + '\0\0' &&
+        nf.slice(s.at.showStr + 64).equals(s.buf.slice(s.at.showStr + 64)) &&
+        nf.slice(s.at.showCall, s.at.showCall + 11).equals(b.slice(s.at.showCall, s.at.showCall + 11)), json(nfl.showui));
+    var nl = Buffer.from(s.buf);
+    writeShowUi(nl, s.at, 'str', undefined, 'noeta');
+    ok('only the ShowUI log text in the form without ETA: found, noeta/stock, partly patched', showIs(locator.locate(nl).showui) === 'noeta/stock' &&
+        require('../carplay_patch.js').classify(nl).showui.state === 'unknown', json(locator.locate(nl).showui));
     for (var k = 1; k < 11; k++) {
         var hc = Buffer.from(s.buf), hs = Buffer.from(s.buf);
         writeShowUi(hc, s.at, 'call', k);
@@ -299,6 +320,141 @@ try {
         r.out.indexOf('call ' + hx(at.call) + ' in onSuggestUi ' + hx(at.onSuggestUi)) >= 0 &&
         r.out.indexOf('immediates ' + [at.mm, at.px, at.safe1, at.safe2].map(hx).join(' ')) >= 0 &&
         r.out.indexOf('build-id:  ' + at.buildId) >= 0, r.out);
+
+    var cpp = require('../carplay_patch.js'), etaOut = path.join(dir, 'eta.plan');
+    r = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--out', etaOut]);
+    var pe = fs.readFileSync(etaOut, 'utf8');
+    function sumOf(x) { try { return JSON.parse(x.out.trim().split('\n').pop()); } catch (e) { return {}; } }
+    function lines(t) { return t.split('\n'); }
+    function differing(a, b2) { return lines(a).map(function (l, i) { return l === lines(b2)[i] ? null : l.split(' ')[1]; }).filter(Boolean); }
+    var lineOf = function (t, name) { return lines(t).filter(function (l) { return l.split(' ')[1] === name; })[0]; };
+    r = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--showui', 'map', '--out', etaOut + '.2']);
+    ok('plan --showui map: refused (no map form in this version), no plan written', r.code !== 0 && /--showui must be eta or noeta/.test(r.out) && !fs.existsSync(etaOut + '.2'), r.out);
+    /* The form without ETA (--showui noeta): eta's plan but the ShowUI log
+     * text (showui-1), holding the URL without ETA; its overlay reads so. */
+    var noetaOut = path.join(dir, 'noeta.plan'), rn = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--showui', 'noeta', '--out', noetaOut]);
+    var pn = rn.code === 0 ? fs.readFileSync(noetaOut, 'utf8') : '', noetaHex = locator.locate(orig).showui.strNoetaBytes;
+    ok('plan --showui noeta: eta\'s plan but the ShowUI log text (showui-1), holding the URL without ETA', rn.code === 0 && json(differing(pe, pn)) === json(['showui-1']) &&
+        lines(pe).length === lines(pn).length && pn.indexOf(' ' + noetaHex + '\n') > 0 && sumOf(rn).writes.showui === 'noeta' && sumOf(r).writes === undefined &&
+        fs.readFileSync(tgt).equals(orig), rn.out);
+    r = run(['overlay', '--target', tgt, '--plan', noetaOut]);
+    ok('plan --showui noeta: its overlay reads PATCHED, ShowUI URL without ETA', /^overlay:\s+ok$/m.test(r.out) &&
+        /^showui:\s+PATCHED \(ShowUI URL without ETA: ShowUI asks the phone for maps:\/car\/instrumentcluster\?showETA=no, without the arrival-time card\)$/m.test(r.out), r.out);
+    (function () {
+        /* Read back: the image the plan makes verifies, reads as ours (a plan
+         * on it refuses it as edited). */
+        var img = cpp.overlay(orig, pn).buf, nt = path.join(dir, 'carplay-noeta');
+        fs.writeFileSync(nt, img, { mode: 0o755 });
+        var v = run(['verify', '--target', nt]), again = run(['plan', '--target', nt, '--panel', 'high', '--unproven', '--out', noetaOut + '.2']);
+        ok('the form without ETA read back: verify OK, ShowUI URL without ETA; classified noeta; a plan on it refused as edited (ours)',
+            v.code === 0 && /^OK: .*, map URL on, ShowUI URL without ETA$/m.test(v.out) && cpp.classify(img).showui.state === 'noeta' &&
+            again.code !== 0 && /in memory needs the pristine build on disk: .*showui edited/.test(again.out) && !fs.existsSync(noetaOut + '.2'), v.out + again.out);
+    })();
+    /* The start page (--start-page root): eta's plan but the log string,
+     * which holds the full cluster page at the map URL's place (so the
+     * initial URL's lea is the same); its overlay reads so, the ShowUI URL
+     * still found and patched; --start-page map: eta's plan. */
+    var rootOut = path.join(dir, 'root.plan'), rr = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--start-page', 'root', '--out', rootOut]);
+    var pr = fs.readFileSync(rootOut, 'utf8'), rootForm = locator.MAP_URL_FORMS.filter(function (f) { return f.name === 'root'; })[0];
+    ok('plan --start-page root: eta\'s plan but the log string (mapurl-1), holding the full cluster page', rr.code === 0 && json(differing(pe, pr)) === json(['mapurl-1']) &&
+        lines(pe).length === lines(pr).length && pr.indexOf(' ' + rootForm.bytes.toString('hex') + '\n') > 0 &&
+        rootForm.bytes.toString('latin1') === 'Head-Unit: no AltDisp.\0maps:/car/instrumentcluster\0\0\0\0\0' && rootForm.at === 23 &&
+        sumOf(rr).writes.start === 'root' && fs.readFileSync(tgt).equals(orig), rr.out);
+    r = run(['overlay', '--target', tgt, '--plan', rootOut]);
+    ok('plan --start-page root: its overlay reads PATCHED, FULL PAGE, the ShowUI URL with ETA', /^overlay:\s+ok$/m.test(r.out) &&
+        /^mapurl:\s+PATCHED, FULL PAGE \(the phone starts on its full cluster page from connect: maps:\/car\/instrumentcluster\)$/m.test(r.out) &&
+        /^showui:\s+PATCHED \(ShowUI asks the phone for maps:\/car\/instrumentcluster\?showETA=yes, with the arrival-time card\)$/m.test(r.out), r.out);
+    (function () {
+        var o = path.join(dir, 'sp.plan'), x = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--start-page', 'map', '--out', o]);
+        ok('plan --start-page map: the plan without the option, byte for byte', x.code === 0 && fs.readFileSync(o, 'utf8') === pe && sumOf(x).writes.start === undefined, x.out);
+    })();
+    /* The root start page with the form without ETA: eta's plan but
+     * mapurl-1 (root's) and showui-1 (noeta's). */
+    var rnOut = path.join(dir, 'root-noeta.plan'), rrn = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--start-page', 'root', '--showui', 'noeta', '--out', rnOut]);
+    var prn = rrn.code === 0 ? fs.readFileSync(rnOut, 'utf8') : '';
+    ok('plan --start-page root --showui noeta: eta\'s plan but mapurl-1 (root\'s) and showui-1 (noeta\'s)', rrn.code === 0 &&
+        json(differing(pe, prn)) === json(['mapurl-1', 'showui-1']) && lines(pe).length === lines(prn).length &&
+        lineOf(prn, 'mapurl-1') === lineOf(pr, 'mapurl-1') && lineOf(prn, 'showui-1') === lineOf(pn, 'showui-1') &&
+        sumOf(rrn).writes.start === 'root' && sumOf(rrn).writes.showui === 'noeta', rrn.out);
+    r = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--start-page', 'home', '--out', rootOut + '.2']);
+    ok('plan --start-page home: refused, no plan written', r.code !== 0 && /--start-page must be map or root/.test(r.out) && !fs.existsSync(rootOut + '.2'), r.out);
+    (function () {
+        var img = Buffer.from(orig);
+        writeMapUrl(img, at, 'both', 'root'); writeShowUi(img, at);
+        var l = locator.locate(img), c = cpp.classify(img);
+        ok('the root start page written: read as root at both sites, patched, the ShowUI URL still found', l.mapurl.ok && mapIs(l.mapurl) === 'root/root' &&
+            c.mapurl.state === 'patched' && c.mapurl.page === 'root' && l.showui.ok && showIs(l.showui) === 'patched/patched', json([l.mapurl, l.showui.reason]));
+        var half = Buffer.from(orig);
+        writeMapUrl(half, at, 'slot', 'root');
+        l = locator.locate(half);
+        ok('the root start page in the log string, the lea stock: partly patched', l.mapurl.ok && mapIs(l.mapurl) === 'root/stock' &&
+            cpp.classify(half).mapurl.state === 'unknown', json(l.mapurl));
+        var changed = Buffer.from(img);
+        changed[at.spare + 23 + 27 + 2] = 0x41;   /* a byte of the NULs after the URL */
+        l = locator.locate(changed);
+        ok('the root start page with a changed byte: the log string not found, refused', !l.mapurl.ok && /map URL: log string not found/.test(l.mapurl.reason), json(l.mapurl));
+        l = locator.locate(Buffer.concat([img, Buffer.from('\0' + locator.ALT_URL + '\0', 'latin1')]));
+        ok('the root start page and another copy of the cluster URL elsewhere: the ShowUI URL refused (only the log string\'s copy is skipped)',
+            l.mapurl.ok && !l.showui.ok && /alternate display URL string found 2 times/.test(l.showui.reason), json(l.showui));
+    })();
+    /* The physical size (--phys): eta's plan but the mm immediate (res-mm),
+     * holding that size; its overlay reads it as ours; another size refused.
+     * Written with the view area moved, or an mm pair next to it, the
+     * geometry does not read as ours. */
+    var mmLine = lines(pe).filter(function (l) { return l.indexOf('edit res-mm ') === 0; })[0] || '';
+    [['145x65', '9100000041000000'], ['150x68', '9600000044000000'], ['155x72', '9b00000048000000'],
+     ['160x75', 'a00000004b000000'], ['165x78', 'a50000004e000000'], ['170x82', 'aa00000052000000'],
+     ['175x85', 'af00000055000000'], ['180x88', 'b400000058000000'], ['200x88', 'c800000058000000']].forEach(function (c) {
+        var o = path.join(dir, 'phys.plan'), x = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--phys', c[0], '--out', o]);
+        var pp = fs.readFileSync(o, 'utf8'), d = lines(pe).map(function (l, i) { return l === lines(pp)[i] ? null : lines(pp)[i]; }).filter(Boolean);
+        ok('plan --phys ' + c[0] + ': eta\'s plan but res-mm, holding ' + c[0] + ' mm', x.code === 0 && d.length === 1 && lines(pe).length === lines(pp).length &&
+            d[0] === mmLine.split(' ').slice(0, 4).concat([c[1]]).join(' ') && mmLine.split(' ')[3] === orig.toString('hex', at.mm, at.mm + 8) &&
+            sumOf(x).writes.res === '1088x480/' + c[0] + '/504x432+286+8' && fs.readFileSync(tgt).equals(orig), json(d));
+        x = run(['overlay', '--target', tgt, '--plan', o]);
+        ok('plan --phys ' + c[0] + ': its overlay reads res PATCHED at ' + c[0] + ' mm', /^overlay:\s+ok$/m.test(x.out) &&
+            new RegExp('^res:\\s+PATCHED \\(IC_HIGH advertises 1088x480 at ' + c[0] + 'mm, safe 504x432 at 286,8\\)$', 'm').test(x.out), x.out);
+    });
+    ['181x88', '146x65', '140x60', '138x61', ''].forEach(function (v) {
+        var x = run(['plan', '--target', tgt, '--panel', 'high', '--unproven', '--phys'].concat(v ? [v] : [], ['--out', rootOut + '.3']));
+        ok('plan --phys ' + (v || '(no value)') + ': refused, no plan written', x.code !== 0 &&
+            /--phys must be 145x65, 150x68, 155x72, 160x75, 165x78, 170x82, 175x85, 180x88 or 200x88/.test(x.out) && !fs.existsSync(rootOut + '.3'), x.out);
+    });
+    (function () {
+        var img = cpp.overlay(orig, pe).buf;
+        img.writeUInt32LE(180, at.mm); img.writeUInt32LE(88, at.mm + 4);
+        ok('Cast\'s size written: the geometry reads as ours', cpp.classify(img).res.state === 'patched', json(cpp.classify(img).res));
+        var moved = Buffer.from(img);
+        moved.writeUInt16LE(2, at.safe1);
+        ok('Cast\'s size with the view area moved: not recognised', cpp.classify(moved).res.state === 'unknown', json(cpp.classify(moved).res));
+        var other = Buffer.from(img);
+        other.writeUInt32LE(181, at.mm);
+        ok('an mm pair next to Cast\'s (181x88): not read as ours', cpp.classify(other).res.state !== 'patched', json(cpp.classify(other).res));
+    })();
+    /* The high panel's default arguments (defaultArgs, what patchd, the
+     * Patch button, an install and boot recovery plan with): exactly the
+     * start page root, 200x88 mm, the ShowUI URL without ETA and the safe
+     * area 504x380 at 286,0 after the panel and coding; an option given
+     * wins; --res stock takes no size or safe area; the mid panel is kept as
+     * it is. Planned, it is eta's plan but the start page, the ShowUI URL
+     * and the geometry, and reads back as asked. */
+    var base = ['--panel', 'high', '--coding', '/dev/shm/rawcodingdata'];
+    var dflt = base.concat(['--start-page', 'root', '--phys', '200x88', '--showui', 'noeta', '--safe', '504x380+286+0']);
+    ok('defaultArgs on the high panel: exactly the cluster setup', json(cpp.defaultArgs(base)) === json(dflt) && json(cpp.defaultArgs(dflt)) === json(dflt), json(cpp.defaultArgs(base)));
+    ok('defaultArgs: an option given wins', json(cpp.defaultArgs(base.concat(['--showui', 'eta', '--safe', 'full']))) ===
+        json(base.concat(['--showui', 'eta', '--safe', 'full', '--start-page', 'root', '--phys', '200x88'])), json(cpp.defaultArgs(base.concat(['--showui', 'eta']))));
+    ok('defaultArgs: --res stock takes no size or safe area; another --res no safe area', json(cpp.defaultArgs(base.concat(['--res', 'stock']))) ===
+        json(base.concat(['--res', 'stock', '--start-page', 'root', '--showui', 'noeta'])) &&
+        json(cpp.defaultArgs(base.concat(['--res', '1280x560']))) === json(base.concat(['--res', '1280x560', '--start-page', 'root', '--phys', '200x88', '--showui', 'noeta'])));
+    ok('defaultArgs: the mid panel kept as it is', json(cpp.defaultArgs(['--panel', 'mid', '--coding', 'x', '--capture', '/f'])) === json(['--panel', 'mid', '--coding', 'x', '--capture', '/f']));
+    (function () {
+        var o = path.join(dir, 'default.plan'), x = run(['plan', '--target', tgt].concat(cpp.defaultArgs(['--panel', 'high']), ['--unproven', '--out', o]));
+        var pd = x.code === 0 ? fs.readFileSync(o, 'utf8') : '', img = x.code === 0 ? cpp.overlay(orig, pd).buf : orig, c = cpp.classify(img);
+        ok('the default arguments planned: eta\'s plan but the start page, the ShowUI URL and the geometry; read back as asked', x.code === 0 &&
+            json(differing(pe, pd)) === json(['res-mm', 'res-safe2', 'mapurl-1', 'showui-1']) &&
+            sumOf(x).writes.res === '1088x480/200x88/504x380+286+0' && sumOf(x).writes.start === 'root' && sumOf(x).writes.showui === 'noeta' &&
+            c.mapurl.page === 'root' && c.showui.state === 'noeta' && c.res.state === 'patched' &&
+            json([c.res.res.mmw, c.res.res.mmh, c.res.res.safew, c.res.res.safeh, c.res.res.safex, c.res.res.safey]) === json([200, 88, 504, 380, 286, 0]), x.out + json(differing(pe, pd)));
+    })();
 
     r = run(['apply', '--target', tgt, '--panel', 'high', '--sink', 'udp://127.0.0.1:20557?mime_type=video/H264', '--unproven', '--yes']);
     var b = fs.readFileSync(tgt), want = Buffer.from(orig);
@@ -593,7 +749,7 @@ if (fs.existsSync(SRC)) {
         loc.res.builder === 0x20ca30 && json([loc.res.mm, loc.res.px, loc.res.safe1, loc.res.safe2]) === json([0x20ca32, 0x20ca54, 0x20ca66, 0x20ca74]), json(loc));
     ok('reference build: the documented map URL sites', loc.mapurl.ok && loc.mapurl.slot === 0x257838 && loc.mapurl.len === 55 && loc.mapurl.lea === 0x7b533 &&
         loc.mapurl.url === 0x25784f && loc.mapurl.builder === 0x2078b0 && loc.mapurl.log === 0x88aa2 && loc.mapurl.leaBytes === '488d3515c31d00' &&
-        json(loc.mapurl.forms.map(function (f) { return [f.name, f.leaBytes]; })) === json([['current', '488d3515c31d00'], ['eta', '488d3509c31d00']]) &&
+        json(loc.mapurl.forms.map(function (f) { return [f.name, f.leaBytes]; })) === json([['current', '488d3515c31d00'], ['eta', '488d3509c31d00'], ['root', '488d3515c31d00']]) &&
         mapIs(loc.mapurl) === 'stock/stock', json(loc.mapurl));
     /* the URL at 0x2908b8: lea rsi at 0x18188d, next 0x181894 */
     ok('reference build: the documented ShowUI URL sites', loc.showui.ok && loc.showui.str === 0x2908a0 && loc.showui.len === 64 && loc.showui.call === 0x18188a &&

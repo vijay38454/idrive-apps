@@ -139,6 +139,12 @@ take `fresh_ms`, only a map its host hides counts as not seen.
 the cluster is hidden (cluster-render README, "Guide hold"). The app's
 **Hide BMW's turn box** checkbox turns that off and on at once.
 
+**CarPlay's cluster page.** On the high panel the patch asks the phone for
+its full cluster page without the arrival-time bar, at Cast's 200x88 mm,
+with the safe area at the map's very top: Apple Maps' and Google Maps' own
+turn card, small at the top. Nothing to type; patch options override it
+(patch/PATCH.md).
+
 **Where the map shows.** The app's **Show on** sets the cluster, the HUD,
 both or neither (**Off**), at once. On the HUD the frames are scaled on the
 head unit to the size shown (**Size**, 30 % to 85 % of the HUD's width, or

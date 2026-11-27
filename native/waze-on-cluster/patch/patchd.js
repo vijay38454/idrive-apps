@@ -1815,12 +1815,14 @@ function revert(noRestart, dropBackup, done) { revertFile(CP, noRestart, dropBac
 
 /* The plan's arguments for the patcher: the panel, the coding it checks
  * and the sink of the mode (avb: the stock sink; udp: the stream sink this
- * tool receives; fifo: the file:// FIFO). */
+ * tool receives; fifo: the file:// FIFO), with the high panel's cluster
+ * setup (carplay_patch.js defaultArgs: start page, size, ShowUI URL, safe
+ * area). */
 function planArgs(panel, mode) {
     var args = ['--panel', panel, '--coding', CODING];
     if (mode === 'udp') args.push('--sink', 'udp://127.0.0.1:' + UDP_PORT + '?mime_type=video/H264');
     else if (mode !== 'avb') args.push('--capture', FIFO);
-    return args;
+    return require('./carplay_patch.js').defaultArgs(args);
 }
 
 /* Android Auto's: aapd.conf, the coding and the owner's density and
@@ -2075,10 +2077,11 @@ function inmemHook(which, cb) {
             return;
         }
         /* An install plans the user's own choices again (the arguments an
-         * enabled plan was made with), with this version's edits. Any build
+         * enabled plan was made with, with the high panel's cluster setup
+         * where they do not name it), with this version's edits. Any build
          * whose sites the patcher finds and verifies is planned, on trial
          * until it ran healthy on this car. */
-        var keep = rec && rec.enabled === true && Array.isArray(rec.args) && rec.args.length ? rec.args : null;
+        var keep = rec && rec.enabled === true && Array.isArray(rec.args) && rec.args.length ? require('./carplay_patch.js').defaultArgs(rec.args) : null;
         inmemApply(CP, keep || planArgs('high', 'avb'), true, function (err, roErr, activation, conflict2, why) {
             if (roErr) log('WARNING: ' + roErr.message + ' — the next head-unit start mounts / read-only again');
             if (conflict2) { out(0, 'carplay left as it is: ' + conflict2, conflict2); return; }

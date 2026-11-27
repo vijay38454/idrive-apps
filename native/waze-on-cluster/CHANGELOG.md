@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+CarPlay on the high panel: with nothing typed, the patch (patchd's own
+plan, CarPlay's Patch button, an install and boot recovery) asks the phone
+for its full cluster page without the arrival-time bar, at Cast's 200x88
+mm, with the safe area at the very top of the map (504x380 at 286,0): the
+phone's own turn card, small at the top. The options `--start-page`,
+`--phys`, `--showui` and `--safe` still override it; the mid panel is
+unchanged. The app shows `Update needed` on a car patched before; one press
+of Patch plans it. The cluster picture is exact by default
+(`tex_level_bits = 0`).
+
 CarPlay: Apple's turn card sits at the top of the cluster map instead of
 over its middle, so the road ahead stays in view. The safe area the patch
 gives the phone now starts 8 rows below the map's top (504x432 at 286,8,

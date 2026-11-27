@@ -185,11 +185,12 @@ function stringAt(buf, off) { var end = buf.indexOf(0, off); return buf.toString
 
 /* The one string that contains `key` and matches `re`: { off } or { err }. A
  * string starts after the last byte before it that is not printable ASCII. */
-function namedString(buf, key, re, label) {
+function namedString(buf, key, re, label, skip) {
     var found = [], k = Buffer.from(key, 'latin1');
     for (var i = buf.indexOf(k); i >= 0; i = buf.indexOf(k, i + 1)) {
         var s = i;
         while (s > 0 && buf[s - 1] >= 0x20 && buf[s - 1] < 0x7f) s--;
+        if (skip && skip(s)) continue;
         if (found.indexOf(s) < 0 && re.test(stringAt(buf, s))) found.push(s);
     }
     if (found.length === 1) return { off: found[0] };
@@ -505,7 +506,11 @@ function locateRes(im, str, refs) {
  * hold it: patched, a shorter log text, its NUL, then the URL. FORMS are the
  * patched forms: `current`, which this version writes, and `eta`, the URL
  * with `?showETA=yes` that releases 0.10.2-0.10.3 wrote, which this version
- * recognises and replaces. */
+ * recognises and replaces. `root`, the full cluster page with the phone's
+ * own cards, is the start page patchd plans on the high panel
+ * (`carplay_patch.js plan --start-page root`): the same log text, so its URL
+ * is at the same place as `current`'s and the initial URL's lea is the same;
+ * only the string differs (NULs to its end). */
 var MAP_URL = 'maps:/car/instrumentcluster/map';
 var SPARE_LOG = 'Head-Unit does not support Alternate Displays feature.';
 var SPARE_LEN = SPARE_LOG.length + 1;
@@ -516,7 +521,9 @@ function spareForm(name, text, url) {
     bytes.write(text + '\0' + url + '\0', 'latin1');
     return { name: name, url: url, at: text.length + 1, bytes: bytes };
 }
-var FORMS = [spareForm('current', 'Head-Unit: no AltDisp.', MAP_URL), spareForm('eta', 'No AltDisp', MAP_URL + '?showETA=yes')];
+var ROOT_URL = 'maps:/car/instrumentcluster';
+var FORMS = [spareForm('current', 'Head-Unit: no AltDisp.', MAP_URL), spareForm('eta', 'No AltDisp', MAP_URL + '?showETA=yes'),
+    spareForm('root', 'Head-Unit: no AltDisp.', ROOT_URL)];
 /* The alternate-display gate: a small function returning `variant <= 1`
  * (IC_HIGH or IC_MID): cmp esi|edi,1 ; setbe al. */
 var GATE = [[0x83, 0xfe, 0x01, 0x0f, 0x96, 0xc0], [0x83, 0xff, 0x01, 0x0f, 0x96, 0xc0]];
@@ -690,7 +697,10 @@ function locateMapUrl(im, res, sp, r, rela, inits) {
     var sites = inits[globals[0]];
     if (sites.length !== 1) return { ok: false, reason: 'map URL: initial URL built ' + sites.length + ' times' };
     var lea = sites[0].at, s = sites[0].src;
-    var leaForm = FORMS.filter(function (f) { return s === slot + f.at; })[0];
+    /* Forms sharing an offset (current and root) load the same lea: it reads
+     * as the slot's form when that is one of them. */
+    var atLea = FORMS.filter(function (f) { return s === slot + f.at; });
+    var leaForm = atLea.filter(function (f) { return buf.slice(slot, slot + SPARE_LEN).equals(f.bytes); })[0] || atLea[0];
     if (s === null || (!leaForm && buf[s] !== 0)) return { ok: false, reason: 'map URL: initial URL built from neither "" nor the URL' };
     if (sites[0].reg === null) return { ok: false, reason: 'map URL: initial URL global not registered for destruction' };
     if (!builtLikeAString(im, inits, globals[0], sites[0].ctor, sites[0].reg)) return { ok: false, reason: 'map URL: initial URL global not built like the other string globals' };
@@ -723,12 +733,19 @@ function locateMapUrl(im, res, sp, r, rela, inits) {
  * bytes of the log text of that same call's result check: patched, the text
  * up to `ShowUI(`, its NUL, then the URL (SHOWUI_FORM). The call site
  * `call getter ; mov rdi,rN ; mov rsi,[rax]` (either order of the two movs)
- * becomes `mov rdi,rN ; lea rsi,[rip+URL] ; nop`, the same 11 bytes. */
+ * becomes `mov rdi,rN ; lea rsi,[rip+URL] ; nop`, the same 11 bytes.
+ *   The form without ETA (SHOWUI_NOETA_FORM, `--showui noeta`, what patchd
+ * plans on the high panel) holds SHOWUI_NOETA_URL, one byte shorter, at the
+ * same place, NULs after it to the form's end: the cluster page without the
+ * arrival-time card. The call site is the same. */
 var ALT_URL = 'maps:/car/instrumentcluster';
 var SHOWUI_URL = ALT_URL + '?showETA=yes';
+var SHOWUI_NOETA_URL = ALT_URL + '?showETA=no';
 var SHOWUI_TEXT = 'mCinemoCarPlay->ShowUI(';
 var SHOWUI_FORM = Buffer.from(SHOWUI_TEXT + '\0' + SHOWUI_URL + '\0', 'latin1');
 var SHOWUI_LEN = SHOWUI_FORM.length, SHOWUI_AT = SHOWUI_TEXT.length + 1, SHOWUI_CALL = 11;
+var SHOWUI_NOETA_FORM = Buffer.alloc(SHOWUI_LEN);
+SHOWUI_NOETA_FORM.write(SHOWUI_TEXT + '\0' + SHOWUI_NOETA_URL + '\0', 'latin1');
 /* The check's log text as built: the expression the call was written as. */
 var SHOWUI_EXPR = /^mCinemoCarPlay->ShowUI\( ::(?:\w+::)*CarPlayConstantsRepository::alternateDisplayUrl\(\)\.c_str\(\), /;
 var MOV_RSI_RAX = [0x48, 0x8b, 0x30], LEA_RSI = Buffer.from([0x48, 0x8d, 0x35]);
@@ -833,7 +850,8 @@ function branchIntoWhyNot(im, rs, a, b) {
  * URL with carplay.conf's SHOW_UI_OPTIONS itself.
  *   The log text: the one string starting `mCinemoCarPlay->ShowUI(`,
  * reading as the check of `ShowUI( …alternateDisplayUrl().c_str(), …`
- * (stock) or as SHOWUI_FORM (patched); without either, a NUL at either of
+ * (stock), as SHOWUI_FORM (patched) or as SHOWUI_NOETA_FORM ('noeta');
+ * without any, a NUL at either of
  * SHOWUI_FORM's NULs (the stock text has none in its first SHOWUI_LEN bytes)
  * is a write of ours cut short ('mixed'). It is loaded by one lea, in
  * requestStream (the function loading its own name at its entry), nothing
@@ -847,13 +865,15 @@ function branchIntoWhyNot(im, rs, a, b) {
  * patched form (or, cut short, a mix of the two), followed by the ShowUI
  * call and its result's check with the log text; no branch lands inside it.
  * strIs and callIs say which form each site holds: 'stock', 'patched' or
- * 'mixed'. */
+ * 'mixed', and strIs 'noeta' for the form without ETA (its call site reads
+ * 'patched'). */
 function locateShowUi(im, str, refs, inits, rela) {
     if (!str.setShowUi.err) return { ok: false, na: true, reason: 'ShowUI URL: not applicable (the build adds carplay.conf\'s SHOW_UI_OPTIONS to it)' };
     if (!im.starts.length) return { ok: false, reason: 'ShowUI URL: no function table' };
     if (str.showUi.err) return { ok: false, reason: 'ShowUI URL: ' + str.showUi.err.replace(/^self-start: ShowUI string/, 'ShowUI log text') };
     var buf = im.buf, s = str.showUi.off;
     var strIs = buf.slice(s, s + SHOWUI_LEN).equals(SHOWUI_FORM) ? 'patched'
+        : buf.slice(s, s + SHOWUI_LEN).equals(SHOWUI_NOETA_FORM) ? 'noeta'
         : buf[s + SHOWUI_AT - 1] === 0 || buf[s + SHOWUI_LEN - 1] === 0 ? 'mixed'
         : SHOWUI_EXPR.test(stringAt(buf, s)) ? 'stock' : null;
     if (!strIs) return { ok: false, reason: 'ShowUI URL: ShowUI not called with the alternate display URL' };
@@ -901,7 +921,7 @@ function locateShowUi(im, str, refs, inits, rela) {
     if (rela.some(function (a) { return a >= sVa && a < sVa + SHOWUI_LEN; })) return { ok: false, reason: 'ShowUI URL: a data pointer into the log text' };
     return {
         ok: true, str: s, len: SHOWUI_LEN, call: at, callLen: SHOWUI_CALL, url: url, getter: getter.off, requestStream: rs.off,
-        strIs: strIs, callIs: win.is, strBytes: SHOWUI_FORM.toString('hex'), callBytes: win.patched.toString('hex'), callStock: win.stock.toString('hex'),
+        strIs: strIs, callIs: win.is, strBytes: SHOWUI_FORM.toString('hex'), strNoetaBytes: SHOWUI_NOETA_FORM.toString('hex'), callBytes: win.patched.toString('hex'), callStock: win.stock.toString('hex'),
     };
 }
 
@@ -968,7 +988,11 @@ function locate(buf) {
     if (sink.ok) for (var i = 0; i < sink.len; i++) offs.push(sink.offset + i);
     if (!spare.err) for (i = 0; i < SPARE_LEN; i++) offs.push(spare.off + i);
     if (!str.showUi.err) for (i = 1; i < SHOWUI_LEN; i++) offs.push(str.showUi.off + i);
-    str.alt = namedString(buf, ALT_URL, /^maps:\/car\/instrumentcluster$/, 'ShowUI URL: alternate display URL');
+    /* The root start page (Edit 5's `root` form) puts a copy of ALT_URL
+     * inside the spare string: that copy is ours, not the URL's own string. */
+    var rootIn = !spare.err && buf.slice(spare.off, spare.off + SPARE_LEN).equals(FORMS[2].bytes);
+    str.alt = namedString(buf, ALT_URL, /^maps:\/car\/instrumentcluster$/, 'ShowUI URL: alternate display URL',
+        function (s) { return rootIn && s >= spare.off && s < spare.off + SPARE_LEN; });
     if (!str.alt.err) offs.push(str.alt.off);
     var refs = leaRefs(im, offs);
     var out = { elf: true, buildId: buildId(buf, elf.notes), version: version(buf), variant: locateVariant(im, str, refs), sink: sinkRefs(sink, refs),
@@ -1056,7 +1080,8 @@ function partsDiffering(p, buf) {
 function sha256(b) { return require('crypto').createHash('sha256').update(b).digest('hex'); }
 
 module.exports = {
-    locate: locate, buildId: elfBuildId, SINK_STOCK: SINK_STOCK, MAP_URL: MAP_URL, MAP_URL_FORMS: FORMS, SHOWUI_URL: SHOWUI_URL, ALT_URL: ALT_URL,
+    locate: locate, buildId: elfBuildId, SINK_STOCK: SINK_STOCK, MAP_URL: MAP_URL, ROOT_URL: ROOT_URL, MAP_URL_FORMS: FORMS, SHOWUI_URL: SHOWUI_URL, ALT_URL: ALT_URL,
+    SHOWUI_NOETA_URL: SHOWUI_NOETA_URL,
     stockOriginal: stockOriginal, partsDiffering: partsDiffering,
     /* both patchers' words for a file another build than its backup by its
      * build-id: a car software update replaced it */
