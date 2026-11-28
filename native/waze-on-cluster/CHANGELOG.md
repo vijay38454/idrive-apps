@@ -18,6 +18,9 @@ gives the phone now starts 8 rows below the map's top (504x432 at 286,8,
 was 504x368 at 286,72); the width and the bottom are unchanged. A car
 patched before shows `Update needed` in the app; one press of CarPlay's
 Patch button and a head-unit restart move the card up.
+## 0.14.21
+
+The cluster and HUD map update with lower latency and less CPU and flash wear, and installing or updating patches runs faster and handles clock jumps more reliably.
 
 ## 0.14.20
 

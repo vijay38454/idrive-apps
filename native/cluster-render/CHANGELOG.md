@@ -44,6 +44,9 @@ it follows lets it hold again (Hide BMW's turn box off and on), without a
 restart. A hold parked again behind such content, then yielding to it, no
 longer counts that as a loss either; parked again behind BMW's turn box
 still counts.
+## 0.8.15
+
+The cluster renderer uses less CPU and memory while drawing and idling, writes logs without stalling frames, and installs a smaller package.
 
 ## 0.8.14
 

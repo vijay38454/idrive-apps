@@ -1,7 +1,7 @@
 {
   "id": "waze-on-cluster",
   "kind": "tool",
-  "version": "0.14.20",
+  "version": "0.14.21",
   "license": "GPL-3.0-or-later",
   "title": "Maps on cluster",
   "description": "Runs the cluster map in the background. It is installed with the Maps on cluster app, which you use to control it.",
@@ -66,6 +66,11 @@
     {
       "path": "aapd_conf.js",
       "from": "patch/aapd_conf.js",
+      "mode": "0644"
+    },
+    {
+      "path": "coding.js",
+      "from": "patch/coding.js",
       "mode": "0644"
     },
     {
